@@ -421,7 +421,7 @@
 				try {
 					this.stop();
 					const resolution = this._getResolution(resolutionType);
-					const constraints = { audio: false, video: { ...resolution, facingMode: facingMode } };
+					const constraints = { audio: false, video: { ...resolution, facingMode: facingMode, zoom: true } };
 
 					this.stream = await navigator.mediaDevices.getUserMedia(constraints);
 					this.videoElement.srcObject = this.stream;
@@ -1075,3 +1075,4 @@
 
 </body>
 </html>
+
