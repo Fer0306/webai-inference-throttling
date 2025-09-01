@@ -461,7 +461,7 @@
 				try {
 					this.stop();
 					const resolution = this._getResolution(resolutionType);
-					const constraints = { audio: false, video: { ...resolution, deviceId: { exact: deviceId } } };
+					const constraints = { audio: false, video: { ...resolution, deviceId: { exact: deviceId }, zoom: true } };
 
 					this.stream = await navigator.mediaDevices.getUserMedia(constraints);
 					this.videoElement.srcObject = this.stream;
@@ -1075,4 +1075,5 @@
 
 </body>
 </html>
+
 
