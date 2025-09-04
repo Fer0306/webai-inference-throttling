@@ -90,7 +90,13 @@ El objetivo es optimizar el uso de recursos en tiempo real, especialmente en dis
 
 ## 📂 Estructura del proyecto
 
-<pre><code>## 📂 Estructura del proyecto ``` webai-inference-throttling/ ├── index.html # Demo principal ├── README.md # Documentación └── LICENSE # Licencia (opcional) ``` </code></pre>
+webai-inference-throttling/
+
+├── index.html # Demo principal
+
+├── README.md # Documentación
+
+└── LICENSE # Licencia (opcional)
 
 
 ---
