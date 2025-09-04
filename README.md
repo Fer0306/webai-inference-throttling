@@ -66,8 +66,8 @@ De esta manera, la arquitectura quedará totalmente modular y alineada con lo de
 
 Esta demo está configurada para detectar **únicamente los siguientes objetos**:
 
-- 🥤 `cup`
-- 🍼 `bottle`
+- 🥤 tazas - `cup`
+- 🍼 botellas - `bottle`
 
 Esto se debe a que se aplica un **filtro de clases** para reducir la carga de procesamiento y enfocarse en un caso de uso específico.  
 Puedes modificar o ampliar este filtro desde el archivo JavaScript (`ModelController.js`).
