@@ -101,7 +101,7 @@ webai-inference-throttling/
 
 ## 📸 Capturas de pantalla (opcional)
 
-![Limitación de inferencia en WebAI](img/inference-throttling-limit.jpg)
+![Limitación de inferencia en WebAI](assets/inference-throttling-limit.jpg)
 
 ---
 
