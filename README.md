@@ -62,12 +62,29 @@ De esta manera, la arquitectura quedará totalmente modular y alineada con lo de
 
 ---
 
+## 🧪 Objetos detectados en la demo
+
+Esta demo está configurada para detectar **únicamente los siguientes objetos**:
+
+- 🥤 `cup`
+- 🍼 `bottle`
+
+Esto se debe a que se aplica un **filtro de clases** para reducir la carga de procesamiento y enfocarse en un caso de uso específico.  
+Puedes modificar o ampliar este filtro desde el archivo JavaScript (`ModelController.js`).
+
+---
+
 ## 🚀 Cómo probarlo
 
 1. Clona este repositorio o descarga el archivo `index.html`.  
 2. Abre `index.html` en tu navegador (se recomienda **Chrome** o **Edge**).  
 3. Acepta permisos de cámara cuando el navegador los solicite.  
 4. Ajusta la frecuencia de inferencia (FPS), cambia de cámara o activa la linterna desde la UI.  
+
+Este proyecto demuestra cómo implementar **throttling de inferencias** en un modelo de IA ejecutado en el navegador usando **TensorFlow.js**.  
+El objetivo es optimizar el uso de recursos en tiempo real, especialmente en dispositivos móviles, evitando bloqueos o sobrecarga cuando se realizan inferencias continuas desde la cámara.
+
+🎮 **[¡Probar la demo en vivo! →](https://fer0306.github.io/fernandofa0306/proyectos/1-webai-inference-throttling/index.html)**
 
 ---
 
@@ -84,7 +101,7 @@ webai-inference-throttling/
 
 ## 📸 Capturas de pantalla (opcional)
 
-*(Aquí puedes incluir imágenes del demo en acción, dentro de la carpeta `/assets` si las agregas)*
+![Limitación de inferencia en WebAI](img/inference-throttling-limit.jpg)
 
 ---
 
