@@ -853,6 +853,8 @@
 
 		// Conectar con Capa 2 (ModelController)
 		modelCtrl.onPredictions = (preds) => {
+			console.log("Predicciones recibidas:", preds);
+			// Aquí enviarías datos a la capa 3
 			processor.process(preds);
 		};
 
