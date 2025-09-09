@@ -84,8 +84,7 @@ Puedes modificar o ampliar este filtro desde el archivo JavaScript (`ModelContro
 Este proyecto demuestra cómo implementar **throttling de inferencias** en un modelo de IA ejecutado en el navegador usando **TensorFlow.js**.  
 El objetivo es optimizar el uso de recursos en tiempo real, especialmente en dispositivos móviles, evitando bloqueos o sobrecarga cuando se realizan inferencias continuas desde la cámara.
 
-🎮 **[¡Probar la demo en vivo! →](
-https://fer0306.github.io/webai-inference-throttling/index.html)**
+🎮 **[¡Probar la demo en vivo! →](https://fer0306.github.io/webai-inference-throttling/index.html)**
 
 ---
 
