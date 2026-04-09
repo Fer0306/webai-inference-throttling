@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — History Phase 3a (Detection v1)
+	---------------------------------------------------------------
+
+	Descripción:
+		Primera implementación de detección con memoria de estado.
+		Introduce comparación básica entre frames utilizando historial
+		de detecciones para evitar renderizado redundante.
+
+	Contexto:
+		Phase 3a — Inicio del procesamiento inteligente.
+		Esta versión presenta un enfoque inicial para evitar redibujos,
+		pero contiene un problema de acumulación de estado.
+
+	Características clave:
+		- Detección en tiempo real con coco-ssd
+		- Filtro de clase (bottle)
+		- Comparación simple de bounding boxes
+		- Persistencia de detecciones en memoria
+		- Renderizado solo para nuevas detecciones
+
+	Limitaciones:
+		- Crecimiento no controlado del historial
+		- No reemplaza estado anterior (acumulación)
+
+	Archivo:
+		src/history/phase3-detection/p3a-detection-history-v1.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT + CC BY 4.0
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="UTF-8" />
+	<title>Phase 3a — Detection v1 (Historial con acumulación)</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		canvas, video {
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+		#contenedor {
+			position: relative;
+			width: 640px;
+			height: 480px;
+		}
+	</style>
+</head>
+<body>
+	<h2>Phase 3a — Detection v1 (Primer historial de detección)</h2>
+	<div id="contenedor">
+		<video id="video" width="640" height="480" autoplay muted></video>
+		<canvas id="canvas" width="640" height="480"></canvas>
+	</div>
+
+	<script>
+		const video = document.getElementById('video');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+		let modelo;
+		let deteccionesAnteriores = [];
+
+		// Función para comparar vectores de caja con tolerancia
+		function sonCajasSimilares(caja1, caja2, tolerancia = 10) {
+			for (let i = 0; i < 4; i++) {
+				if (Math.abs(caja1[i] - caja2[i]) > tolerancia) return false;
+			}
+			return true;
+		}
+
+		function yaFueDetectada(nueva, anteriores) {
+			return anteriores.some(ant =>
+				ant.class === nueva.class && sonCajasSimilares(ant.bbox, nueva.bbox)
+			);
+		}
+
+		async function procesarFrame() {
+			const predicciones = await modelo.detect(video);
+
+			const soloBotellas = predicciones.filter(p => p.class === 'bottle');
+
+			// Limpiar canvas (sólo lo necesario)
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+			for (let botella of soloBotellas) {
+					if (!yaFueDetectada(botella, deteccionesAnteriores)) {
+						// Dibujar caja nueva
+						const [x, y, w, h] = botella.bbox;
+						ctx.strokeStyle = 'lime';
+						ctx.lineWidth = 2;
+						ctx.strokeRect(x, y, w, h);
+						ctx.font = '16px sans-serif';
+						ctx.fillStyle = 'lime';
+						ctx.fillText(`${botella.class} (${(botella.score * 100).toFixed(1)}%)`, x, y - 5);
+
+						// Guardar detección para el siguiente frame
+						deteccionesAnteriores.push(botella);
+					}
+			}
+
+			// Limpiar detecciones viejas (opcional)
+			if (deteccionesAnteriores.length > 50) {
+				deteccionesAnteriores.splice(0, 20); // elimina las más antiguas
+			}
+
+			requestAnimationFrame(procesarFrame);
+		}
+
+		async function iniciar() {
+			const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+			video.srcObject = stream;
+
+			modelo = await cocoSsd.load();
+			console.log('Modelo cargado. Iniciando detección...');
+			procesarFrame();
+		}
+
+	    iniciar();
+	</script>
+</body>
+</html>

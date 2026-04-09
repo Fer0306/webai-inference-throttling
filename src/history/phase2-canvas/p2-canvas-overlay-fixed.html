@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+
+<!--
+	===============================================================
+		WebAI Inference Throttling — Phase 2 (Canvas Overlay)
+	---------------------------------------------------------------
+
+	Descripción:
+		Implementación de un canvas sincronizado sobre el flujo de video
+		para permitir renderizado visual de resultados en tiempo real.
+
+		Este archivo introduce la superposición (overlay) entre el video
+		y el canvas, resolviendo problemas de alineación, escalado y
+		renderizado consistente en diferentes dispositivos.
+
+	Contexto:
+		Phase 2 — Representación visual.
+		Después de controlar la cámara (Phase 1), el siguiente paso fue
+		crear una capa visual que permitiera dibujar información encima
+		del video en tiempo real.
+
+	Aquí aparece por primera vez:
+		- Detección de objetos (coco-ssd)
+		- Renderizado de bounding boxes
+		- Sincronización video ↔ canvas
+
+	Características clave:
+		- Canvas posicionado sobre el video (overlay absoluto)
+		- Loop de detección en tiempo real (requestAnimationFrame)
+		- Renderizado de bounding boxes
+		- Filtro de clases (bottle)
+		- Control de cámara (zoom digital, torch, cambio de dispositivo)
+		- Pantalla de carga para inicialización progresiva
+
+	Problema resuelto:
+		Alineación precisa entre coordenadas del modelo y el canvas
+		en un entorno responsivo.
+
+	Archivo:
+		src/history/phase2-canvas/p2-canvas-overlay-fixed.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT (Código) + CC BY 4.0 (documentación)
+
+	    Nota: Este archivo representa el primer punto donde la
+			  inferencia se vuelve visible para el usuario mediante
+			  renderizado directo sobre el video.
+	===============================================================
+-->
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Phase 2 — Canvas Overlay (Visual Layer)</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+<style>
+	body { margin: 0; padding: 0; font-family: sans-serif; background:#222; color:#eee; }
+	#video-container {
+		position: relative;
+		width: 100vw;
+		max-width: 400px;
+		margin: auto;
+		overflow: hidden;
+		border-radius: 12px;
+		background: black;
+	}
+	video {
+		width: 100%;
+		transform-origin: center center;
+		transition: transform 0.2s ease;
+	}
+	canvas {
+		position: absolute;
+		top:0; left:0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		border: 4px solid red;
+  		box-sizing: border-box;
+	}
+	#controls {
+		max-width: 400px;
+		margin: 12px auto;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+		justify-content: center;
+	}
+	button, select, input[type=range] {
+		padding: 8px 12px;
+		font-size: 16px;
+		border-radius: 8px;
+		border: none;
+		outline:none;
+		background: #444;
+		color: #eee;
+		cursor: pointer;
+	}
+	label {
+		display: block;
+		font-size: 14px;
+		margin-bottom: 4px;
+		text-align:center;
+	}
+	#alerta {
+		color: #f55;
+		text-align:center;
+		margin-top: 8px;
+		min-height: 1.5em;
+	}
+
+	#pantalla-bloqueo {
+		position: fixed;
+		top: 0; left: 0;
+		width: 100vw;
+		height: 100vh;
+		background: rgba(0, 0, 0, 0.9);
+		color: #fff;
+		font-size: 20px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		z-index: 9999;
+		flex-direction: column;
+	}
+	#mensaje-carga {
+		padding: 20px;
+		border: 2px solid #fff;
+		border-radius: 12px;
+		background: #333;
+		text-align: center;
+	}
+	.subtitle { color: #aaa; font-size: 14px; margin-top: -20px; text-align: center; }
+
+</style>
+</head>
+<body>
+
+	<div id="pantalla-bloqueo">
+		<div id="mensaje-carga">Iniciando...</div>
+	</div>
+
+	<h2 style="text-align:center;">Phase 2 — Canvas Overlay</h2>
+	<p class="subtitle">
+	Renderizado en tiempo real de inferencias mediante superposición sincronizada entre video y canvas
+	</p>
+
+	<div id="video-container">
+		<video id="video" autoplay muted playsinline></video>
+		<canvas id="canvas" width="400" height="300"></canvas>
+	</div>
+
+	<div id="controls">
+		<div>
+			<label for="cameras">Cámara:</label>
+			<select id="cameras"></select>
+		</div>
+		<div>
+			<label for="zoom-range">Zoom:</label>
+			<input type="range" id="zoom-range" min="1" max="3" step="0.1" value="1" />
+		</div>
+		<div>
+			<button id="toggle-torch">Linterna OFF</button>
+		</div>
+	</div>
+
+	<p id="alerta"></p>
+
+	<!-- INICIO DE JS -->
+	<script>
+		const video = document.getElementById('video');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+		const camerasSelect = document.getElementById('cameras');
+		const zoomRange = document.getElementById('zoom-range');
+		const toggleTorchBtn = document.getElementById('toggle-torch');
+		const alerta = document.getElementById('alerta');
+
+		let stream = null;
+		let modelo = null;
+		let currentDeviceId = null;
+		let torchOn = false;
+
+		async function listarCamaras() {
+			const dispositivos = await navigator.mediaDevices.enumerateDevices();
+			const videoDevices = dispositivos.filter(d => d.kind === 'videoinput');
+			camerasSelect.innerHTML = '';
+			videoDevices.forEach((device, i) => {
+				const option = document.createElement('option');
+				option.value = device.deviceId;
+				option.text = device.label || `Camara ${i + 1}`;
+				camerasSelect.appendChild(option);
+			});
+			if(videoDevices.length > 0){
+				currentDeviceId = videoDevices[0].deviceId;
+			}
+		}
+
+		async function iniciarStream(deviceId) {
+			if (stream) {
+				stream.getTracks().forEach(track => track.stop());
+			}
+			try {
+				stream = await navigator.mediaDevices.getUserMedia({
+				video: {
+					deviceId: deviceId ? { exact: deviceId } : undefined,
+					width: { ideal: 320 },
+					height: { ideal: 240 },
+					facingMode: 'environment'
+				},
+				audio: false
+				});
+				video.srcObject = stream;
+				currentDeviceId = deviceId;
+
+				alerta.textContent = '';
+
+				// Al iniciar el stream reiniciamos el zoom
+				zoomRange.value = 1;
+				video.style.transform = 'scale(1)';
+				torchOn = false;
+				toggleTorchBtn.textContent = 'Linterna OFF';
+
+			} catch (e) {
+				alerta.textContent = 'Error accediendo a cámara: ' + e.message;
+			}
+		}
+
+		camerasSelect.addEventListener('change', () => {
+			iniciarStream(camerasSelect.value);
+		});
+
+		zoomRange.addEventListener('input', () => {
+			const zoom = zoomRange.value;
+			// Zoom digital simple (escalar el video)
+			video.style.transform = `scale(${zoom})`;
+		});
+
+		toggleTorchBtn.addEventListener('click', async () => {
+			if (!stream) return;
+			const videoTrack = stream.getVideoTracks()[0];
+			const capabilities = videoTrack.getCapabilities();
+
+			if (!capabilities.torch) {
+				alerta.textContent = 'Linterna no soportada en este dispositivo/navegador';
+				return;
+			}
+
+			torchOn = !torchOn;
+			try {
+				await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+				toggleTorchBtn.textContent = torchOn ? 'Linterna ON' : 'Linterna OFF';
+				alerta.textContent = '';
+			} catch (e) {
+				alerta.textContent = 'Error controlando linterna: ' + e.message;
+			}
+		});
+
+		// Carga el modelo y empieza detección en loop
+		async function iniciarDeteccion() {
+			modelo = await cocoSsd.load();
+			detectarLoop();
+		}
+
+		async function detectarLoop() {
+			if (video.readyState !== 4) {
+				requestAnimationFrame(detectarLoop);
+				return;
+			}
+			const predicciones = await modelo.detect(video);
+
+			ctx.clearRect(0, 0, canvas.width, canvas.height);
+			predicciones.forEach(p => {
+				if (p.class === 'bottle') {
+				const [x, y, w, h] = p.bbox;
+				ctx.strokeStyle = 'lime';
+				ctx.lineWidth = 2;
+				ctx.strokeRect(x, y, w, h);
+				ctx.font = '14px sans-serif';
+				ctx.fillStyle = 'lime';
+				ctx.fillText(`Botella ${(p.score * 100).toFixed(1)}%`, x, y - 8);
+				}
+			});
+			requestAnimationFrame(detectarLoop);
+		}
+
+		// Inicia la app
+		async function iniciar() {
+			mostrarMensajeCarga("CARGANDO CÁMARA...");
+			await listarCamaras();
+			mostrarMensajeCarga("INICIANDO STREAM DE CÁMARA...");
+			await iniciarStream(currentDeviceId);
+			mostrarMensajeCarga("CARGANDO MODELO DE DETECCIÓN...");
+			await iniciarDeteccion();
+			ocultarPantallaCarga();
+		}
+
+		iniciar();
+
+		function mostrarMensajeCarga(mensaje) {
+			const pantalla = document.getElementById("pantalla-bloqueo");
+			const mensajeDiv = document.getElementById("mensaje-carga");
+			mensajeDiv.textContent = mensaje;
+			pantalla.style.display = "flex";
+		}
+
+		function ocultarPantallaCarga() {
+			const pantalla = document.getElementById("pantalla-bloqueo");
+			pantalla.style.display = "none";
+		}
+
+	</script>
+
+</body>
+</html>

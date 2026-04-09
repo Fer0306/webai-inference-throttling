@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — History Phase 3c (Detection v2)
+	---------------------------------------------------------------
+
+	Descripción:
+		Corrección del modelo de historial de detecciones.
+		Se reemplaza el estado anterior en lugar de acumularlo,
+		logrando una representación fiel del estado actual del entorno.
+
+	Contexto:
+		Phase 3c — Refinamiento del modelo de estado.
+		Esta versión soluciona el problema de acumulación presente
+		en la versión anterior.
+
+	Características clave:
+		- Comparación eficiente entre frames
+		- Detección de cambios reales en escena
+		- Reemplazo completo del estado (state overwrite)
+		- Renderizado condicional optimizado
+		- Throttling por tiempo
+
+	Mejora clave:
+		- Eliminación del crecimiento innecesario en memoria
+		- Representación precisa del estado actual
+
+	Archivo:
+		src/history/phase3-detection/p3c-detection-history-v2.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT + CC BY 4.0
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="UTF-8" />
+	<title>Phase 3c — Detection v2 (State Overwrite Fix)</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		#contenedor {
+			position: relative;
+			width: 320px;
+			height: 240px;
+		}
+		video, canvas {
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+	</style>
+</head>
+<body>
+	<h2>Phase 3c — Detection v2 (Corrección de estado)</h2>
+	<div id="contenedor">
+		<video id="video" width="320" height="240" autoplay muted></video>
+		<canvas id="canvas" width="320" height="240"></canvas>
+	</div>
+
+	<script>
+		const video = document.getElementById('video');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+		let modelo;
+		let deteccionesAnteriores = [];
+
+		function sonCajasSimilares(caja1, caja2, tolerancia = 10) {
+			for (let i = 0; i < 4; i++) {
+				if (Math.abs(caja1[i] - caja2[i]) > tolerancia) return false;
+			}
+			return true;
+		}
+
+		function yaFueDetectada(nueva, anteriores) {
+			return anteriores.some(ant =>
+				ant.class === nueva.class && sonCajasSimilares(ant.bbox, nueva.bbox)
+			);
+		}
+
+		function limpiarCajasAntiguas() {
+			if (deteccionesAnteriores.length > 50) {
+				deteccionesAnteriores.splice(0, 20);
+			}
+		}
+
+		function dibujarCaja(b) {
+			const [x, y, w, h] = b.bbox;
+			ctx.strokeStyle = 'lime';
+			ctx.lineWidth = 2;
+			ctx.strokeRect(x, y, w, h);
+			ctx.font = '12px sans-serif';
+			ctx.fillStyle = 'lime';
+			ctx.fillText(`${b.class} (${(b.score * 100).toFixed(1)}%)`, x, y - 5);
+		}
+
+		async function procesarFrame() {
+			if (video.readyState !== 4) {
+				requestAnimationFrame(procesarFrame);
+				return;
+			}
+
+			// 🚀 Solo analizamos cada 3 frames para ahorrar batería
+			const ahora = Date.now();
+			if (!procesarFrame.ultimo || ahora - procesarFrame.ultimo > 150) {
+				procesarFrame.ultimo = ahora;
+
+				const predicciones = await modelo.detect(video);
+				const soloBotellas = predicciones.filter(p => p.class === 'bottle');
+
+				// 💡 Comparamos con el historial y determinamos si hay cambios
+				let hayCambios = false;
+
+				if (soloBotellas.length !== deteccionesAnteriores.length) {
+					hayCambios = true;
+				} else {
+					for (let i = 0; i < soloBotellas.length; i++) {
+						if (!yaFueDetectada(soloBotellas[i], deteccionesAnteriores)) {
+							hayCambios = true;
+							break;
+						}
+					}
+				}
+
+				if (hayCambios) {
+					ctx.clearRect(0, 0, canvas.width, canvas.height);
+					soloBotellas.forEach(dibujarCaja);
+					deteccionesAnteriores = soloBotellas; // 🔁 Actualiza con la nueva escena
+				}
+			}
+
+			requestAnimationFrame(procesarFrame);
+		}
+
+
+		async function iniciar() {
+			// 🔻 Baja resolución de entrada para menor consumo
+			const stream = await navigator.mediaDevices.getUserMedia({
+				video: { width: 320, height: 240 }
+			});
+
+			video.srcObject = stream;
+
+			modelo = await cocoSsd.load();
+			console.log('Modelo cargado');
+			requestAnimationFrame(procesarFrame);
+		}
+
+	    iniciar();
+	</script>
+</body>
+</html>

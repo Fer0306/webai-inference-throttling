@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — Phase 6b (Smart Throttle + IoU Tracker)
+	---------------------------------------------------------------
+
+	Descripción:
+		Demostración avanzada de inferencia en tiempo real en navegador
+		con control dinámico de rendimiento y tracking de objetos.
+
+	Incorpora una arquitectura modular de 4 capas:
+		- VideoController        (captura y control de cámara)
+		- ModelController        (inferencia con TensorFlow.js - coco-ssd)
+		- VectorProcessor        (tracking de objetos con IoU + estabilidad)
+		- CanvasRenderer         (render optimizado en canvas)
+
+	Contexto:
+		Phase 6b — Smart Throttle + Tracking.
+
+		Representa la evolución del sistema hacia un modelo adaptativo,
+		donde la frecuencia de inferencia (FPS) se ajusta automáticamente
+		según el rendimiento del dispositivo y la carga de procesamiento.
+
+	Características clave:
+		- Throttling dinámico basado en presupuesto de CPU
+		- Calibración automática por dispositivo (warmup runs)
+		- Tracking persistente de objetos usando IoU
+		- Reducción de render innecesario (onChange / onStable)
+		- Filtro de clases (bottle, cup, person)
+		- Soporte de zoom, torch y múltiples cámaras
+		- Optimización HiDPI en canvas
+
+	Archivo:
+		src/history/phase6-smart-throttle/p6b-webai-throttling-ioutracker.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT (Código) + CC BY 4.0 (documentación)
+
+		Nota: Este archivo demuestra la transición de un sistema de inferencia
+			  básico a un sistema inteligente adaptativo con tracking temporal
+			  y optimización de recursos en tiempo real.
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="UTF-8"/>
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Phase 6b — Smart Throttle + IoU Tracker</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		body {
+			font-family: sans-serif;
+			background: #222;
+			color: #eee;
+			margin: 0;
+			padding: 0;
+			text-align: center;
+		}
+		h2 {
+			margin-bottom: 50px; /* espacio debajo del título */
+		}
+	</style>
+
+	<style>
+		/* Contenedor de cámara y controles */
+		#Camera, #InferenceControls {
+			width: 90%; /* por defecto más fluido */
+			margin: 5px auto;
+			text-align: center;
+		}
+		#Camera {
+			display: flex;
+			justify-content: center; /* centra horizontal */
+			align-items: center;     /* centra vertical */
+			flex-direction: column;  /* mantiene título y controles debajo */
+		}
+		/* Ajuste de botones principales */
+		#InferenceControls {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: nowrap;
+		}
+		#InferenceControls > div {
+			flex: 1;
+			min-width: 120px;
+		}
+		#cameravideo {
+			width: 100%;
+			height: 50vh; /* 50% de la altura de la ventana */
+			background: black;
+			overflow: hidden;
+			border-radius: 12px;
+			position: relative;
+		}
+		video {
+			top: 0;
+			left: 0;
+			display: block;
+			width: 100%; /* Hace que el video llene todo el contenedor horizontalmente */
+			height: 100%; /* Hace que el video llene todo el contenedor verticalmente */
+			object-fit: fill; /* fuerza el estirado */
+			position: absolute;
+		}
+		canvas {
+			top: 0;
+			left: 0;
+			display: block;
+			width: 100%;
+			height: 100%;
+			pointer-events: none;
+			position: absolute;
+		}
+		/* Controles de cámara */
+		#cameraControls {
+			max-width: 600px;
+			margin: 5px auto;
+			display: flex;
+			flex-wrap: wrap;
+			gap: 12px;
+			justify-content: center;
+		}
+		#cameraControls > div {
+			flex: 1;
+			min-width: 140px;
+		}
+		/* Botones */
+		button, select, input[type=range] {
+			padding: 10px 14px;
+			font-size: 16px;
+			border-radius: 8px;
+			border: none;
+			outline: none;
+			background: #444;
+			color: #eee;
+			cursor: pointer;
+			width: 100%; /* full en móvil */
+			box-sizing: border-box;
+		}
+		/* Select FPS en solo lectura — visual diferenciado */
+		select#frames {
+			background: #333;
+			color: #aaa;
+			cursor: default;
+			pointer-events: none;
+			border: 1px solid #555;
+		}
+		label {
+			display: block;
+			font-size: 14px;
+			margin-bottom: 4px;
+			text-align: center;
+		}
+		label.fps-label {
+			color: #aaa;
+			font-size: 12px;
+		}
+		/* Pequeño indicador "AUTO" junto al FPS */
+		#fpsAutoTag {
+			font-size: 10px;
+			color: #39ff14;
+			letter-spacing: 1px;
+			margin-top: 2px;
+			display: block;
+		}
+		#cameraMessages {
+			margin-top: 5px;
+			color: #ff6666;
+			font-size: 14px;
+			min-height: 20px;
+		}
+
+		/* ── LOADING OVERLAY ── */
+		#loadOverlay {
+			position: fixed;
+			inset: 0;
+			background: #222;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 14px;
+			z-index: 999;
+		}
+		#loadOverlay h3 {
+			font-size: 14px;
+			letter-spacing: 2px;
+			text-transform: uppercase;
+			color: #eee;
+			margin: 0;
+		}
+		#loadMsg {
+			font-size: 13px;
+			color: #aaa;
+			font-family: monospace;
+		}
+		.spinner {
+			width: 34px; height: 34px;
+			border: 3px solid #444;
+			border-top-color: #39ff14;
+			border-radius: 50%;
+			animation: spin 0.8s linear infinite;
+		}
+		@keyframes spin { to { transform: rotate(360deg); } }
+
+		/* ── INFO BUTTON ── */
+		#infoButton {
+			position: fixed;
+			top: 20px;
+			right: 20px;
+			z-index: 998;
+			background: #444;
+			color: #eee;
+			border-radius: 50%;
+			border: none;
+			width: 70px;
+			height: 70px;
+			font-size: 32px;
+			cursor: pointer;
+		}
+		/* Panel de información: adaptar tamaño */
+		#cameraInfo {
+			position: fixed;
+			top: 80px;
+			right: 20px;
+			width: 300px;
+			background: #333;
+			color: #eee;
+			border-radius: 12px;
+			padding: 16px;
+			box-shadow: 0 0 10px rgba(0,0,0,0.7);
+			display: none;
+			z-index: 997;
+		}
+		#cameraInfo > h3 {
+			margin-top: 0;
+		}
+		#closeCameraInfo {
+			margin-top: 12px;
+			padding: 6px 12px;
+			border-radius: 8px;
+			cursor: pointer;
+			border: none;
+			background-color: #007bff;
+			color: #eee;
+		}
+
+		/* ==== MEDIA QUERIES ==== */
+
+		/* 📱 Teléfonos (pantallas < 600px) */
+		@media (max-width: 600px) {
+			#InferenceControls > div {
+				flex: 1 1 auto;      /* No crecer demasiado, pero sí reducir si es necesario */
+				min-width: 90px;     /* Ancho mínimo para que el contenido quepa */
+				max-width: 120px;    /* Opcional: limitar el ancho máximo */
+			}
+			#cameraControls {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+			}
+			#cameravideo {
+				width: 55%; /* 50% */
+				height: 41vh; /* 35vh*/
+			}
+			button, select, input[type=range] {
+				font-size: 14px;
+			}
+			#divzoom {
+				grid-column: 1 / -1; /* hace que ocupe toda la fila */
+				width: 100%;
+			}
+		}
+
+		/* 📲 Tablets (entre 600px y 900px) */
+		@media (min-width: 601px) and (max-width: 900px) {
+			#InferenceControls > div {
+				flex: 1 1 auto;      /* No crecer demasiado, pero sí reducir si es necesario */
+				min-width: 90px;     /* Ancho mínimo para que el contenido quepa */
+				max-width: 120px;    /* Opcional: limitar el ancho máximo */
+			}
+			#cameraControls {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+			}
+			#cameravideo {
+				width: 45%; /* 50% */
+				height: 55vh; /* 35vh*/
+			}
+			button, select, input[type=range] {
+				font-size: 14px;
+			}
+			#divzoom {
+				grid-column: 1 / -1; /* hace que ocupe toda la fila */
+				width: 100%;
+			}
+		}
+
+		/* 💻 PC (más de 900px) */
+		@media (min-width: 901px) {
+			h2 {
+				margin-bottom: 0px; /* espacio debajo del título */
+			}
+			#Camera, #InferenceControls {
+				width: 65%;
+			}
+			#cameraControls {
+				display: grid;
+				grid-template-columns: repeat(2, 1fr);
+				gap: 12px;
+			}
+			#divzoom {
+				grid-column: 1 / -1; /* hace que ocupe toda la fila */
+				width: 100%;
+			}
+		}
+
+		/* 📱 Teléfonos (pantallas < 600px) */
+/*		@media (max-width: 600px) { body { background: #00ff0dff; } }
+		/* 📲 Tablets (entre 600px y 900px) */
+/*		@media (min-width: 601px) and (max-width: 900px) { body { background: #fff200ff; }}
+		/* 💻 PC (más de 900px) */
+/*		@media (min-width: 901px) { body { background: #003cffff; } }
+*/
+		.demo-subtitle { font-size:12px; color:#aaa; }
+	</style>
+</head>
+<body>
+
+	<!-- LOADING OVERLAY -->
+	<div id="loadOverlay">
+		<div class="spinner"></div>
+		<h3>WebAI Inference Throttling</h3>
+		<p id="loadMsg">Iniciando…</p>
+	</div>
+
+	<h2>Phase 6b — Smart Throttle + IoU Tracker</h2>
+
+	<h2>
+		Phase 6b — Smart Throttle + IoU Tracker
+		<br>
+		<span class="demo-subtitle">Adaptive Inference + Object Persistence</span>
+	</h2>
+
+	<!-- Botón flotante de información -->
+	<button id="infoButton" title="Información de la cámara">ℹ️</button>
+
+	<!-- Panel de información -->
+	<div id="cameraInfo">
+		<h3>Info Cámara / Sistema</h3>
+		<div id="cameraInfoContent"></div>
+		<button id="closeCameraInfo">Cerrar</button>
+	</div>
+
+	<!-- Controles Inferencia -->
+	<div id="InferenceControls">
+		<div>
+			<button id="cameraToggleButton">Apagar<br>Cámara</button>
+		</div>
+		<div>
+			<label class="fps-label" for="frames">FpS: <span id="fpsAutoTag">● AUTO</span></label>
+			<select id="frames" title="FPS calibrado automáticamente">
+				<option value="1">1</option>
+				<option value="2">2</option>
+				<option value="3">3</option>
+				<option value="4">4</option>
+				<option value="5" selected>5</option>
+				<option value="6">6</option>
+				<option value="7">7</option>
+				<option value="8">8</option>
+				<option value="9">9</option>
+				<option value="10">10</option>
+			</select>
+		</div>
+		<div>
+			<button id="toggleDetectionButton">Apagar<br>Detección</button>
+		</div>
+	</div>
+
+	<div id="Camera">
+		<!-- Video + Canvas Camara -->
+		<div id="cameravideo">
+			<video id="video" autoplay muted playsinline></video>
+			<canvas id="canvas"></canvas>
+		</div>
+
+		<!-- Mensaje Camara-->
+		<div id="cameraMessages"></div>
+
+		<!-- Controles Camara -->
+		<div id="cameraControls">
+			<div>
+				<label for="cameras">Cámara:</label>
+				<select id="cameras"></select>
+			</div>
+			<div>
+				<label for="ToggleTorchButton">Linterna:</label>
+				<button id="ToggleTorchButton">Linterna OFF</button>
+			</div>
+			<div id="divzoom">
+				<label for="ZoomRangeControl">Zoom:</label>
+				<input type="range" id="ZoomRangeControl" min="1" max="5" step="0.1" value="1" />
+			</div>
+		</div>
+	</div>
+
+	<script>
+		// ============================================================
+		//  MÓDULO: ThrottleController
+		//  Responsabilidad: Heurística automática de rendimiento
+		//  - Calibra el dispositivo en warmup (runs)
+		//  - Calcula FPS objetivo según ms de inferencia y resolución
+		//  - Ajuste dinámico continuo: ±1 (sube/baja 1) fps por ciclo
+		//  - Presupuesto de CPU configurable (BUDGET_MS_PER_SEC)
+		// ============================================================
+		class ThrottleController {
+			constructor(options = {}) {
+				this.BUDGET_MS   = options.budgetMs   || 200;  // ms/s para inferencia (~20% CPU)
+				this.WARMUP_RUNS = options.warmupRuns || 3;
+				this.targetFPS   = options.initialFPS || 5;
+				this.avgInferMs  = options.initialAvgMs || 120;
+				this.lastInferMs = 120;
+				this.calibrated  = false;
+			}
+
+			async calibrate(detectFn, videoElement) {
+				const times = [];
+				for (let i = 0; i < this.WARMUP_RUNS; i++) {
+					const t0 = performance.now();
+					await detectFn(videoElement);
+					times.push(performance.now() - t0);
+				}
+				this.avgInferMs = times.reduce((a, b) => a + b, 0) / times.length;
+				const pixels = (videoElement.videoWidth || 640) * (videoElement.videoHeight || 480);
+				this.targetFPS  = this._estimateFPS(this.avgInferMs, pixels);
+				this.calibrated = true;
+				return { avgInferMs: this.avgInferMs, targetFPS: this.targetFPS };
+			}
+
+			update(actualInferMs) {
+				this.lastInferMs = actualInferMs;
+				const budgetFps  = Math.max(1, Math.floor(this.BUDGET_MS / Math.max(1, actualInferMs)));
+				if      (budgetFps < this.targetFPS)                          this.targetFPS = Math.max(1, this.targetFPS - 1);
+				else if (budgetFps > this.targetFPS && this.targetFPS < 30)   this.targetFPS++;
+			}
+
+			get interval() { return 1000 / this.targetFPS; }
+
+			_estimateFPS(avgMs, pixCount) {
+				const budgetFps = Math.max(1, Math.floor(this.BUDGET_MS / Math.max(1, avgMs)));
+				const base   = 1280 * 720;
+				const factor = Math.max(0.5, Math.min(1.0, base / Math.max(base, pixCount)));
+				return Math.max(1, Math.floor(budgetFps * factor));
+			}
+		}
+	</script>
+
+	<script>
+		// ============================================================
+		//  MÓDULO 1: VideoController
+		//  Responsabilidad: Gestión completa de la cámara
+		//  - getUserMedia, cambio de cámara, zoom, linterna
+		//  - Detecta capacidades reales del dispositivo
+		// ============================================================
+		class VideoController {
+			constructor(videoElement) {
+				if (!(videoElement instanceof HTMLVideoElement))
+					throw new Error("Debes pasar un elemento <video> válido.");
+				this.videoElement    = videoElement;
+				this.stream          = null;
+				this.track           = null;
+				this.devices         = [];
+				this.currentDeviceId = null;
+				this.torchEnabled    = false;
+				this.zoomSupported   = false;
+				this.torchSupported  = false;
+				this.onReady   = null;
+				this.onError   = null;
+				this.onDevices = null;
+			}
+
+			static isSupported() {
+				return 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices;
+			}
+
+			async getDevices() {
+				const devices = await navigator.mediaDevices.enumerateDevices();
+				this.devices  = devices.filter(d => d.kind === 'videoinput');
+				if (this.onDevices) this.onDevices(this.devices);
+				return this.devices;
+			}
+
+			async init(resolutionType = 'HD', facingMode = 'environment') {
+				this.stop();
+				const res = this._getResolution(resolutionType);
+				const constraints = { audio: false, video: { ...res, facingMode } };
+				this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+				this.videoElement.srcObject = this.stream;
+				this.track  = this.stream.getVideoTracks()[0];
+				this.currentDeviceId = this.track.getSettings().deviceId;
+				await this._waitForVideoReady();
+				this._updateCapabilities();
+				if (this.onReady) this.onReady();
+				await this.getDevices();
+			}
+
+			async switchCamera(deviceId, resolutionType = 'HD') {
+				this.stop();
+				const res = this._getResolution(resolutionType);
+				const constraints = { audio: false, video: { ...res, deviceId: { exact: deviceId } } };
+				this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+				this.videoElement.srcObject = this.stream;
+				this.track  = this.stream.getVideoTracks()[0];
+				this.currentDeviceId = this.track.getSettings().deviceId;
+				await this._waitForVideoReady();
+				this._updateCapabilities();
+				if (this.onReady) this.onReady();
+			}
+
+			stop() {
+				if (this.stream) {
+					this.stream.getTracks().forEach(t => t.stop());
+					this.stream = null;
+					this.track  = null;
+				}
+				this.videoElement.srcObject = null;
+			}
+
+			isZoomSupported()    { return !!(this.track && this.zoomSupported); }
+			isTorchSupported()   { return !!(this.track && this.torchSupported); }
+			isReady()            { return !!(this.stream && this.track); }
+			isRendered()         { return !!(this.videoElement && this.videoElement.readyState >= 2); }
+
+			getZoomConfiguration() {
+				if (!this.track || !this.zoomSupported) return null;
+				const caps = this.track.getCapabilities();
+				const sets  = this.track.getSettings();
+				return caps.zoom
+					? { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1, value: sets.zoom || caps.zoom.min }
+					: null;
+			}
+
+			async setZoom(value) {
+				if (!this.track || !this.zoomSupported) return;
+				await this.track.applyConstraints({ advanced: [{ zoom: value }] });
+			}
+
+			async toggleTorch() {
+				if (!this.track || !this.torchSupported) return false;
+				this.torchEnabled = !this.torchEnabled;
+				await this.track.applyConstraints({ advanced: [{ torch: this.torchEnabled }] });
+				return this.torchEnabled;
+			}
+
+			_updateCapabilities() {
+				if (!this.track || typeof this.track.getCapabilities !== 'function') return;
+				const caps = this.track.getCapabilities();
+				this.zoomSupported  = 'zoom'  in caps;
+				this.torchSupported = 'torch' in caps;
+			}
+
+			_getResolution(type) {
+				const map = {
+					QVGA:   { width: { ideal: 320  }, height: { ideal: 240  } },
+					VGA:    { width: { ideal: 640  }, height: { ideal: 480  } },
+					HD:     { width: { ideal: 1280 }, height: { ideal: 720  } },
+					FullHD: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+					'4K':   { width: { ideal: 3840 }, height: { ideal: 2160 } },
+				};
+				return map[type] || map['HD'];
+			}
+
+			_waitForVideoReady() {
+				return new Promise((resolve, reject) => {
+					const done    = () => { cleanup(); resolve(); };
+					const fail    = (e) => { cleanup(); reject(e); };
+					const cleanup = () => {
+						this.videoElement.removeEventListener('canplay', done);
+						this.videoElement.removeEventListener('error',   fail);
+					};
+					this.videoElement.addEventListener('canplay', done, { once: true });
+					this.videoElement.addEventListener('error',   fail, { once: true });
+				});
+			}
+		}
+	</script>
+
+	<script>
+		// ============================================================
+		//  MÓDULO 2: ModelController
+		//  Responsabilidad: Inferencia ML con throttling integrado
+		//  - Carga del modelo (coco-ssd, extensible)
+		//  - Loop requestAnimationFrame con ThrottleController
+		//  - Filtrado de clases configurable
+		//  - Detecta cambios en el historial (optimización de render)
+		// ============================================================
+		class ModelController {
+			constructor(videoElement, options = {}) {
+				if (!(videoElement instanceof HTMLVideoElement))
+					throw new Error("Debes pasar un elemento <video> válido.");
+				this.video         = videoElement;
+				this.model         = null;
+				this.modelName     = options.modelName || 'coco-ssd';
+				this.filterClasses = Array.isArray(options.filterClasses) ? options.filterClasses : null;
+				this.running       = false;
+				this.throttle      = options.throttleCtrl || new ThrottleController();
+				this.lastInferTs   = 0;
+				this.onPredictions = options.onPredictions || (() => {});
+				this.onMetrics     = options.onMetrics     || (() => {});
+			}
+
+			async loadModel() {
+				if (this.modelName === 'coco-ssd') {
+					this.model = await cocoSsd.load();
+				} else {
+					throw new Error('Modelo no soportado: ' + this.modelName);
+				}
+			}
+
+			async calibrate() {
+				if (!this.model) throw new Error('Carga el modelo primero.');
+				return await this.throttle.calibrate(
+					(vid) => this.model.detect(vid),
+					this.video
+				);
+			}
+
+			start() {
+				if (!this.model) throw new Error('Carga el modelo primero.');
+				this.running = true;
+				this._loop();
+			}
+
+			stop() { this.running = false; }
+
+			async _loop() {
+				if (!this.running) return;
+				const now = performance.now();
+				if (now - this.lastInferTs >= this.throttle.interval) {
+					if (this.video.readyState >= 2) {
+						try {
+							const t0      = performance.now();
+							const raw     = await this.model.detect(this.video);
+							const inferMs = performance.now() - t0;
+
+							this.throttle.update(inferMs);
+
+							const preds = this.filterClasses
+								? raw.filter(p => this.filterClasses.includes(p.class))
+								: raw;
+
+							this.onPredictions(preds);
+							this.onMetrics({ inferMs, targetFPS: this.throttle.targetFPS, count: preds.length });
+							this.lastInferTs = now;
+						} catch (e) {
+							console.error('Error en inferencia:', e);
+						}
+					}
+				}
+				requestAnimationFrame(() => this._loop());
+			}
+		}
+	</script>
+
+	<script>
+		// ============================================================
+		//  MÓDULO 3: VectorProcessor — Object Tracker con IoU
+		//  Responsabilidad: Tracking temporal de objetos detectados
+		//  - Asigna identidad persistente (id) a cada objeto entre frames
+		//  - Matching por IoU y distancia de centros (no por índice)
+		//  - Envejece y elimina objetos no vistos (MAX_AGE frames)
+		//  - Si hay cambios reales → dispara onChange (render)
+		//  - Si el estado es estable → dispara onStable (sin draw calls)
+		// ============================================================
+		class VectorProcessor {
+			constructor(options = {}) {
+				this.objects        = [];
+				this.nextId         = 1;
+				this.IOU_THRESHOLD  = options.iouThreshold  || 0.4;
+				this.DIST_THRESHOLD = options.distThreshold || 80;
+				this.MIN_SCORE      = options.minScore      || 0.5;
+				this.MAX_AGE        = options.maxAge        || 3;
+				this.onChange       = options.onChange      || (() => {});
+				this.onStable       = options.onStable      || (() => {});
+			}
+
+			process(predictions) {
+				// 1. Filtrar por score mínimo
+				const filtered = predictions.filter(p => p.score >= this.MIN_SCORE);
+
+				// 2. Snapshot del estado anterior para detectar cambios reales
+				const prevState = this.objects.map(o => ({ id: o.id, bbox: [...o.bbox] }));
+
+				// 3. Marcar todos como no actualizados
+				this.objects.forEach(obj => obj.updated = false);
+
+				// 4. Matching: asociar cada predicción a un objeto existente
+				for (const pred of filtered) {
+					const match = this._findMatch(pred);
+					if (match) {
+						match.bbox         = [...pred.bbox];
+						match.score        = pred.score;
+						match.class        = pred.class;
+						match.age          = 0;
+						match.updated      = true;
+						match.stableFrames++;
+					} else {
+						this.objects.push({
+							id:           this.nextId++,
+							class:        pred.class,
+							bbox:         [...pred.bbox],
+							score:        pred.score,
+							age:          0,
+							stableFrames: 1,
+							updated:      true
+						});
+					}
+				}
+
+				// 5. Envejecer y limpiar objetos no vistos
+				this.objects = this.objects.filter(obj => {
+					if (!obj.updated) obj.age++;
+					return obj.age <= this.MAX_AGE;
+				});
+
+				// 6. Disparar según si hubo cambio real
+				if (this._stateChanged(prevState)) {
+					this.onChange(this.objects);
+				} else {
+					this.onStable();
+				}
+			}
+
+			_stateChanged(prevState) {
+				if (this.objects.length !== prevState.length) return true;
+				for (const curr of this.objects) {
+					const prev = prevState.find(p => p.id === curr.id);
+					if (!prev) return true;
+					for (let j = 0; j < 4; j++) {
+						if (Math.abs(curr.bbox[j] - prev.bbox[j]) > 2) return true;
+					}
+				}
+				return false;
+			}
+
+			_findMatch(pred) {
+				let bestMatch = null;
+				let bestIoU   = 0;
+				for (const obj of this.objects) {
+					if (obj.class !== pred.class) continue;
+					const iou = this._iou(obj.bbox, pred.bbox);
+					if (iou > this.IOU_THRESHOLD && iou > bestIoU) {
+						bestIoU   = iou;
+						bestMatch = obj;
+					}
+				}
+				if (!bestMatch) {
+					for (const obj of this.objects) {
+						if (obj.class !== pred.class) continue;
+						if (this._centerDistance(obj.bbox, pred.bbox) < this.DIST_THRESHOLD) {
+							bestMatch = obj;
+							break;
+						}
+					}
+				}
+				return bestMatch;
+			}
+
+			_iou(a, b) {
+				const x1 = Math.max(a[0], b[0]);
+				const y1 = Math.max(a[1], b[1]);
+				const x2 = Math.min(a[0] + a[2], b[0] + b[2]);
+				const y2 = Math.min(a[1] + a[3], b[1] + b[3]);
+				const inter = Math.max(0, x2 - x1) * Math.max(0, y2 - y1);
+				const union = a[2] * a[3] + b[2] * b[3] - inter;
+				return union === 0 ? 0 : inter / union;
+			}
+
+			_centerDistance(a, b) {
+				const dx = (a[0] + a[2] / 2) - (b[0] + b[2] / 2);
+				const dy = (a[1] + a[3] / 2) - (b[1] + b[3] / 2);
+				return Math.sqrt(dx * dx + dy * dy);
+			}
+		}
+	</script>
+
+	<script>
+		// ============================================================
+		//  MÓDULO 4: CanvasRenderer
+		//  Responsabilidad: Renderizado en canvas con soporte HiDPI, separado del proceso
+		//  - Solo dibuja cuando hay cambios reales (VectorProcessor detecta cambios)
+		//  - Ajuste automático de resolución HiDPI (devicePixelRatio)
+		//  - Colores por clase configurables
+		// ============================================================
+		class CanvasRenderer {
+			constructor(canvasElement, options = {}) {
+				if (!(canvasElement instanceof HTMLCanvasElement))
+					throw new Error("Se requiere un <canvas> válido.");
+				this.canvas = canvasElement;
+				this.ctx    = canvasElement.getContext('2d');
+				this.colors = options.colors || {
+					bottle: '#39ff14',
+					cup:    '#00e5ff',
+					person: '#ffa640',
+				};
+				this.defaultColor = options.defaultColor || '#ffffff';
+				this.dpr = window.devicePixelRatio || 1;
+			}
+
+			syncToVideo(videoElement) {
+				const vw = videoElement.videoWidth  || 640;
+				const vh = videoElement.videoHeight || 480;
+				this.canvas.width  = Math.round(vw * this.dpr);
+				this.canvas.height = Math.round(vh * this.dpr);
+				this.canvas.style.width  = '100%';
+				this.canvas.style.height = '100%';
+				this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+			}
+
+			draw(objects) {
+				const ctx = this.ctx;
+				const vw  = this.canvas.width  / this.dpr;
+				const vh  = this.canvas.height / this.dpr;
+				ctx.clearRect(0, 0, vw, vh);
+
+				for (const obj of objects) {
+					const [x, y, w, h] = obj.bbox;
+					const color    = this.colors[obj.class] || this.defaultColor;
+					const isStable = obj.stableFrames >= 3;
+
+					// Caja: color pleno si estable, gris si nuevo/incierto
+					ctx.strokeStyle = isStable ? color : '#888888';
+					ctx.lineWidth   = isStable ? 2.5 : 1;
+					ctx.strokeRect(x, y, w, h);
+
+					// Label con #id, clase y score
+					const label = `#${obj.id} ${obj.class} (${(obj.score * 100).toFixed(0)}%)`;
+					ctx.font = '12px "Share Tech Mono", monospace';
+					const tw = ctx.measureText(label).width;
+					const ty = y > 22 ? y - 6 : y + 18;
+
+					ctx.fillStyle = 'rgba(0,0,0,0.72)';
+					ctx.fillRect(x - 1, ty - 13, tw + 8, 16);
+
+					ctx.fillStyle = isStable ? color : '#aaaaaa';
+					ctx.fillText(label, x + 3, ty);
+
+					// Punto de estabilidad en esquina superior derecha del bbox
+					if (isStable) {
+						ctx.fillStyle = color;
+						ctx.beginPath();
+						ctx.arc(x + w - 6, y + 6, 3, 0, Math.PI * 2);
+						ctx.fill();
+					}
+				}
+			}
+
+			clear() {
+				const vw = this.canvas.width  / this.dpr;
+				const vh = this.canvas.height / this.dpr;
+				this.ctx.clearRect(0, 0, vw, vh);
+			}
+		}
+	</script>
+
+	<script>
+		// ======================================================
+		// 📸 CONEXIÓN DE LOS MÓDULOS
+		//
+		//   - VideoController
+		//   - ModelController
+		//   - VectorProcessor
+		//   - CanvasRenderer
+		//
+		//  CON LA UI
+		// ======================================================
+		(async () => {
+
+			// ── Referencias DOM ──
+			const videoElement       = document.getElementById('video');
+			const canvasElement      = document.getElementById('canvas');
+			const loadOverlay        = document.getElementById('loadOverlay');
+			const loadMsg            = document.getElementById('loadMsg');
+			const cameraMessages     = document.getElementById('cameraMessages');
+			const cameraToggleButton = document.getElementById('cameraToggleButton');
+			const toggleDetectionButton = document.getElementById('toggleDetectionButton');
+			const selectCameras      = document.getElementById('cameras');
+			const framesSelect       = document.getElementById('frames');
+			const torchBtn           = document.getElementById('ToggleTorchButton');
+			const zoomControl        = document.getElementById('ZoomRangeControl');
+			const infoButton         = document.getElementById('infoButton');
+			const cameraInfo         = document.getElementById('cameraInfo');
+			const closeCameraInfo    = document.getElementById('closeCameraInfo');
+
+			// ── Inactividad ──
+			const INACTIVITY_MS = 25000;
+			let inactivityTimer     = null;
+			let inactivityCountdown = null;
+
+			// ── Instancias ──
+			const videoCtrl   = new VideoController(videoElement);
+			const throttle    = new ThrottleController({ budgetMs: 200, warmupRuns: 3 });
+			const renderer    = new CanvasRenderer(canvasElement);
+
+			const vectorProcessor = new VectorProcessor({
+				onChange: (vectors) => {
+					renderer.draw(vectors);
+					resetInactivity();
+				},
+				onStable: () => {
+					if (vectorProcessor.objects.length > 0) resetInactivity();
+				}
+			});
+
+			const modelCtrl = new ModelController(videoElement, {
+				filterClasses: ['bottle', 'cup', 'person'],
+				throttleCtrl:  throttle,
+				onPredictions: (preds) => {
+					vectorProcessor.process(preds);
+				},
+				onMetrics: ({ targetFPS }) => {
+					// Actualizar el select FPS como indicador de solo lectura
+					syncFpsSelect(targetFPS);
+				},
+			});
+
+			// ── Sincroniza el select de FPS (solo lectura) con el valor calibrado ──
+			function syncFpsSelect(fps) {
+				const clamped = Math.min(Math.max(Math.round(fps), 1), 10);
+				framesSelect.value = clamped;
+			}
+
+			// ── VideoController callbacks ──
+			videoCtrl.onReady = () => {
+				renderer.syncToVideo(videoElement);
+				configureCameraUI();
+				cameraMessages.textContent = '';
+				console.log(`✅ Cámara lista: ${videoElement.videoWidth}×${videoElement.videoHeight}`);
+			};
+
+			videoCtrl.onDevices = (devices) => {
+				selectCameras.innerHTML = '';
+				devices.forEach((d, i) => {
+					const option = document.createElement('option');
+					option.value = d.deviceId;
+					option.textContent = d.label || `Cámara ${i + 1}`;
+					if (d.deviceId === videoCtrl.currentDeviceId) option.selected = true;
+					selectCameras.appendChild(option);
+				});
+			};
+
+			videoCtrl.onError = (err) => {
+				cameraMessages.textContent = `❌ Error al acceder a la cámara: ${err.message}`;
+			};
+
+			// ── Arranque ──
+			try {
+				setLoad('Accediendo a la cámara…');
+				await videoCtrl.init('HD', 'environment');
+
+				setLoad('Cargando modelo de detección…');
+				await modelCtrl.loadModel();
+
+				setLoad('Calibrando para este dispositivo…');
+				const cal = await modelCtrl.calibrate();
+				syncFpsSelect(cal.targetFPS);
+				console.log(`✅ Calibrado: ${cal.avgInferMs.toFixed(0)} ms avg → ${cal.targetFPS} fps`);
+
+				modelCtrl.start();
+				resetInactivity();
+				hideLoad();
+
+			} catch (e) {
+				console.error(e);
+				loadMsg.textContent = '❌ Error: ' + e.message;
+			}
+
+			// ── Inactividad ──
+			function resetInactivity() {
+				clearTimeout(inactivityTimer);
+				clearInterval(inactivityCountdown);
+				inactivityTimer = setTimeout(() => {
+					clearInterval(inactivityCountdown);
+					modelCtrl.stop();
+					renderer.clear();
+					toggleDetectionButton.innerHTML = 'Encender<br>Detección';
+					cameraMessages.textContent = '⏸ Detección pausada por inactividad. Pulse "Encender Detección".';
+				}, INACTIVITY_MS);
+			}
+
+			// ── Pausa automática por visibilidad ──
+			document.addEventListener('visibilitychange', () => {
+				if (document.hidden) {
+					modelCtrl.stop();
+				} else if (videoCtrl.isReady()) {
+					modelCtrl.start();
+					resetInactivity();
+				}
+			});
+
+			// ── Eventos UI ──
+
+			// Enciende/Apaga cámara
+			cameraToggleButton.addEventListener('click', async () => {
+				if (videoCtrl.isReady()) {
+					videoCtrl.stop();
+					renderer.clear();
+				} else {
+					const id = videoCtrl.currentDeviceId || null;
+					if (id) await videoCtrl.switchCamera(id, 'HD');
+					else    await videoCtrl.init('HD', 'environment');
+				}
+				configureCameraUI();
+			});
+
+			// Enciende/Apaga detección
+			toggleDetectionButton.addEventListener('click', () => {
+				if (modelCtrl.running) {
+					modelCtrl.stop();
+					renderer.clear();
+					clearTimeout(inactivityTimer);
+					clearInterval(inactivityCountdown);
+					toggleDetectionButton.innerHTML = 'Encender<br>Detección';
+					cameraMessages.textContent = '';
+				} else {
+					modelCtrl.start();
+					resetInactivity();
+					toggleDetectionButton.innerHTML = 'Apagar<br>Detección';
+					cameraMessages.textContent = '';
+				}
+			});
+
+			// Cambio de cámara
+			selectCameras.addEventListener('change', async (e) => {
+				await videoCtrl.switchCamera(e.target.value, 'HD');
+				renderer.syncToVideo(videoElement);
+				configureCameraUI();
+			});
+
+			// Zoom
+			zoomControl.addEventListener('input', async (e) => {
+				await videoCtrl.setZoom(parseFloat(e.target.value));
+			});
+
+			// Linterna
+			torchBtn.addEventListener('click', async () => {
+				const state = await videoCtrl.toggleTorch();
+				torchBtn.textContent = state ? 'Linterna ON' : 'Linterna OFF';
+			});
+
+			// Cambio de dispositivos en caliente
+			navigator.mediaDevices.addEventListener('devicechange', async () => {
+				await videoCtrl.getDevices();
+			});
+
+			// Resize / orientación
+			window.addEventListener('resize', () => {
+				if (videoCtrl.isReady()) renderer.syncToVideo(videoElement);
+			});
+			window.addEventListener('orientationchange', () => {
+				setTimeout(() => {
+					if (videoCtrl.isReady()) renderer.syncToVideo(videoElement);
+				}, 300);
+			});
+
+			// ── Info panel ──
+			infoButton.addEventListener('click', () => {
+				const zoomConfig = videoCtrl.getZoomConfiguration();
+				const resolution = `${videoElement.videoWidth}×${videoElement.videoHeight}`;
+				document.getElementById('cameraInfoContent').innerHTML = `
+					<p>Resolución: <strong>${resolution}</strong></p>
+					<p>FPS calibrado: <strong>${throttle.targetFPS} fps</strong></p>
+					<p>Avg inferencia: <strong>${throttle.avgInferMs.toFixed(1)} ms</strong></p>
+					<p>Zoom soportado: <strong>${zoomConfig ? 'Sí' : 'No'}</strong></p>
+					<p>Linterna: <strong>${videoCtrl.isTorchSupported() ? 'Sí' : 'No'}</strong></p>
+					<p>Device ID: <strong style="font-size:11px">${(videoCtrl.currentDeviceId || '—').slice(0, 24)}…</strong></p>
+				`;
+				cameraInfo.style.display = 'block';
+			});
+
+			closeCameraInfo.addEventListener('click', () => {
+				cameraInfo.style.display = 'none';
+			});
+
+			// ── Helpers ──
+			function setLoad(msg)   { loadMsg.textContent = msg; }
+			function hideLoad()     { loadOverlay.style.display = 'none'; }
+
+			function configureCameraUI() {
+				const ready = videoCtrl.isReady();
+
+				// Zoom
+				if (ready && videoCtrl.isZoomSupported()) {
+					const zc = videoCtrl.getZoomConfiguration();
+					if (zc) {
+						zoomControl.min   = zc.min;
+						zoomControl.max   = zc.max;
+						zoomControl.step  = zc.step;
+						zoomControl.value = zc.value;
+						zoomControl.disabled = false;
+					} else {
+						zoomControl.disabled = true;
+					}
+				} else {
+					zoomControl.disabled = true;
+				}
+
+				torchBtn.disabled        = !videoCtrl.isTorchSupported();
+				selectCameras.disabled   = !ready;
+				toggleDetectionButton.disabled = !ready;
+
+				cameraToggleButton.innerHTML = ready
+					? 'Apagar<br>Cámara'
+					: 'Encender<br>Cámara';
+			}
+
+		})();
+	</script>
+
+</body>
+</html>

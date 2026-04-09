@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — History Phase 3d (UI Throttle)
+	---------------------------------------------------------------
+
+	Descripción:
+		Control dinámico del throttling desde la interfaz de usuario.
+		Permite ajustar la frecuencia de inferencia en función de
+		las necesidades de rendimiento o precisión.
+
+	Contexto:
+		Phase 3d — Human-in-the-loop.
+		Se introduce la capacidad de control manual sobre la
+		frecuencia de procesamiento.
+
+	Características clave:
+		- Throttling configurable por frames
+		- Control directo desde la UI
+		- Balance entre rendimiento y precisión
+		- Comparación con historial de detecciones
+		- Renderizado condicional optimizado
+
+	Aporte clave:
+		- Introducción de control humano sobre el sistema
+		- Ajuste dinámico sin modificar código
+
+	Archivo:
+		src/history/phase3-detection/p3d-detection-throttle-ui.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT + CC BY 4.0
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="UTF-8" />
+	<title>Phase 3d — UI Throttling (Control dinámico)</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		#contenedor {
+			position: relative;
+			width: 320px;
+			height: 240px;
+		}
+		video, canvas {
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+	</style>
+</head>
+<body>
+	<h2>Phase 3d — Throttling controlado por UI</h2>
+
+	<div style="margin: 10px 0;">
+		<label for="frecuencia">Analizar cada:</label>
+		<select id="frecuencia">
+			<option value="1">1 frame (todos)</option>
+			<option value="2">2 frames</option>
+			<option value="3" selected>3 frames</option>
+			<option value="5">5 frames</option>
+			<option value="10">10 frames</option>
+		</select>
+	</div>
+
+	<div id="contenedor">
+		<video id="video" width="320" height="240" autoplay muted></video>
+		<canvas id="canvas" width="320" height="240"></canvas>
+	</div>
+
+	<script>
+		const video = document.getElementById('video');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+
+		let modelo;
+		let deteccionesAnteriores = [];
+		let cadaCuantosFrames = 3;
+		let frameCount = 0;
+
+		function sonCajasSimilares(caja1, caja2, tolerancia = 10) {
+			for (let i = 0; i < 4; i++) {
+				if (Math.abs(caja1[i] - caja2[i]) > tolerancia) return false;
+			}
+			return true;
+		}
+
+		function yaFueDetectada(nueva, anteriores) {
+			return anteriores.some(ant =>
+				ant.class === nueva.class && sonCajasSimilares(ant.bbox, nueva.bbox)
+			);
+		}
+
+		function dibujarCaja(b) {
+			const [x, y, w, h] = b.bbox;
+			ctx.strokeStyle = 'lime';
+			ctx.lineWidth = 2;
+			ctx.strokeRect(x, y, w, h);
+			ctx.font = '12px sans-serif';
+			ctx.fillStyle = 'lime';
+			ctx.fillText(`${b.class} (${(b.score * 100).toFixed(1)}%)`, x, y - 5);
+		}
+
+		async function procesarFrame() {
+			if (video.readyState !== 4) {
+				requestAnimationFrame(procesarFrame);
+				return;
+			}
+
+			frameCount++;
+
+			if (frameCount % cadaCuantosFrames === 0) {
+				const predicciones = await modelo.detect(video);
+				const soloBotellas = predicciones.filter(p => p.class === 'bottle');
+
+				let hayCambios = false;
+				if (soloBotellas.length !== deteccionesAnteriores.length) {
+					hayCambios = true;
+				} else {
+					for (let i = 0; i < soloBotellas.length; i++) {
+						if (!yaFueDetectada(soloBotellas[i], deteccionesAnteriores)) {
+							hayCambios = true;
+							break;
+						}
+					}
+				}
+
+				if (hayCambios) {
+					ctx.clearRect(0, 0, canvas.width, canvas.height);
+					soloBotellas.forEach(dibujarCaja);
+					deteccionesAnteriores = soloBotellas;
+				}
+			}
+
+			requestAnimationFrame(procesarFrame);
+		}
+
+		async function iniciar() {
+			const stream = await navigator.mediaDevices.getUserMedia({
+				// 🔻 Resolución Baja de entrada para menor consumo
+				video: { width: 320, height: 240 }
+				// 🔻 Resolución Mediana de entrada para menor consumo
+//				video: { width: 640, height: 480 }
+			});
+
+			video.srcObject = stream;
+
+			modelo = await cocoSsd.load();
+			console.log('Modelo cargado');
+			requestAnimationFrame(procesarFrame);
+		}
+
+		iniciar();
+
+		document.getElementById('frecuencia').addEventListener('change', function () {
+			cadaCuantosFrames = parseInt(this.value);
+			console.log(`Cambiar a cada ${cadaCuantosFrames} frame(s)`);
+		});
+
+	</script>
+</body>
+</html>

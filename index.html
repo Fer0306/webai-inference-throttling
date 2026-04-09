@@ -1,1035 +1,1018 @@
 <!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — Demo Hub (Main Menu)
+	---------------------------------------------------------------
+
+	Descripción:
+		Interfaz central de navegación que organiza y presenta las
+		diferentes versiones evolutivas del sistema de inferencia
+		en navegador.
+
+	Propósito:
+		Servir como punto de entrada único (hub) para explorar las
+		distintas arquitecturas implementadas, permitiendo entender
+		progresivamente la evolución técnica del proyecto.
+
+	Estructura:
+		- Lista de demos (V1 → V4)
+		- Timeline interactivo con acordeón
+		- Visualización del pipeline final (v4)
+
+	Contexto:
+		Este archivo no ejecuta inferencia directamente.
+		Su objetivo es documentar, comunicar y facilitar la
+		exploración del sistema completo.
+
+	Versiones disponibles:
+		- V1: Throttling manual (3 capas)
+		- V2: Auto FPS + separación en 4 capas
+		- V3: Optimización por diff (VectorProcessor)
+		- V4: Object Tracking con IoU + IDs persistentes
+
+	Características clave:
+		- Navegación clara entre versiones
+		- Diseño visual orientado a ingeniería
+		- Timeline explicativo con detalles técnicos
+		- Arquitectura final representada como pipeline
+		- UI desacoplada de la lógica de inferencia
+
+	Archivo:
+		index.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT (Código) + CC BY 4.0 (documentación)
+
+		Nota: Este hub refleja la filosofía del proyecto:
+		“Evolución incremental con separación de responsabilidades”.
+	===============================================================
+-->
 <html lang="es">
 <head>
 	<meta charset="UTF-8"/>
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>WebAI Inference Throttling Demo</title>
-	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
-	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<title>WebAI Inference Throttling — Fernando Flores Alvarado</title>
+	<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 	<style>
-		body {
-			font-family: sans-serif;
-			background: #222;
-			color: #eee;
-			margin: 0;
-			padding: 0;
-			text-align: center;
+		:root {
+			--bg:       #070b0f;
+			--surface:  #0c1219;
+			--surface2: #101a24;
+			--border:   #7b7f86;
+			--border2:  #4b5157;
+			--accent:   #00d4ff;
+			--green:    #2dff7e;
+			--amber:    #f5a623;
+			--dim:      #93989d;
+			--mid:      #b3c7d9;
+			--text:     #b8cedd;
+			--white:    #e8f2f8;
+			--mono:     'JetBrains Mono', monospace;
+			--sans:     'Syne', sans-serif;
 		}
-		h2 {
-			margin-bottom: 50px; /* espacio debajo del título */
-		}
-	</style>
 
-	<style>
-		/* Contenedor de cámara y controles */
-		#Camera, #InferenceControls {
-			width: 90%; /* por defecto más fluido */
-			margin: 5px auto;
-			text-align: center;
+		*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+		html { scroll-behavior: smooth; }
+
+		body {
+			background: var(--bg);
+			color: var(--text);
+			font-family: var(--sans);
+			min-height: 100vh;
+			overflow-x: hidden;
 		}
-		#Camera {
-			display: flex;
-			justify-content: center; /* centra horizontal */
-			align-items: center;     /* centra vertical */
-			flex-direction: column;  /* mantiene título y controles debajo */
+
+		body::before {
+			content: '';
+			position: fixed;
+			inset: 0;
+			background-image: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.012) 2px, rgba(0,212,255,0.012) 4px);
+			pointer-events: none;
+			z-index: 100;
 		}
-		/* Ajuste de botones principales */
-		#InferenceControls {
+
+		body::after {
+			content: '';
+			position: fixed;
+			inset: 0;
+			background-image: radial-gradient(circle, rgba(0,212,255,0.07) 1px, transparent 1px);
+			background-size: 28px 28px;
+			pointer-events: none;
+			z-index: 0;
+		}
+
+		.glow-orb {
+			position: fixed;
+			top: -200px;
+			left: 50%;
+			transform: translateX(-50%);
+			width: 700px;
+			height: 500px;
+			background: radial-gradient(ellipse at center, rgba(0,212,255,0.07) 0%, transparent 70%);
+			pointer-events: none;
+			z-index: 0;
+		}
+
+		.page {
+			position: relative;
+			z-index: 1;
+			max-width: 860px;
+			margin: 0 auto;
+			padding: 0 24px;
+		}
+
+		/* ── HEADER ── */
+		header {
+			padding: 60px 0 48px;
 			display: flex;
-			justify-content: space-between;
+			flex-direction: column;
+			gap: 14px;
+			border-bottom: 1px solid var(--border2);
+		}
+
+		.badge-owasp {
+			display: inline-flex;
 			align-items: center;
-			gap: 10px;
-			flex-wrap: nowrap;
+			gap: 8px;
+			font-family: var(--mono);
+			font-size: 10px;
+			font-weight: 500;
+			letter-spacing: 2px;
+			text-transform: uppercase;
+			color: var(--green);
+			border: 1px solid rgba(45,255,126,0.25);
+			border-radius: 4px;
+			padding: 4px 12px;
+			width: fit-content;
 		}
-		#InferenceControls > div {
+
+		.badge-owasp::before {
+			content: '';
+			width: 6px; height: 6px;
+			border-radius: 50%;
+			background: var(--green);
+			box-shadow: 0 0 8px var(--green);
+			animation: pulse 2s ease-in-out infinite;
+		}
+
+		@keyframes pulse {
+			0%, 100% { opacity: 1; }
+			50% { opacity: 0.4; }
+		}
+
+		header h1 {
+			font-family: var(--sans);
+			font-size: clamp(28px, 5vw, 48px);
+			font-weight: 800;
+			letter-spacing: -1px;
+			line-height: 1.1;
+			color: var(--white);
+		}
+
+		header h1 span { color: var(--accent); }
+
+		.header-sub {
+			font-family: var(--mono);
+			font-size: 12px;
+			color: var(--mid);
+			line-height: 1.7;
+			max-width: 560px;
+		}
+
+		/* ── SECTION LABEL ── */
+		.section-label {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			font-family: var(--mono);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 3px;
+			text-transform: uppercase;
+			color: var(--accent);
+			margin-bottom: 20px;
+		}
+
+		.section-label::before { content: '//'; color: var(--dim); }
+		.section-label::after {
+			content: '';
 			flex: 1;
-			min-width: 120px;
+			height: 1px;
+			background: linear-gradient(to right, var(--border2), transparent);
 		}
-		#cameravideo {
+
+		/* ── MAIN ── */
+		main {
+			padding: 52px 0 80px;
+			display: flex;
+			flex-direction: column;
+			gap: 64px;
+		}
+
+		/* ══════════════════════════════════════
+		DEMO BUTTONS — columna única centrada
+		══════════════════════════════════════ */
+		.demos-list {
+			display: flex;
+			flex-direction: column;
+			gap: 12px;
+			max-width: 640px;
+			margin: 0 auto;
 			width: 100%;
-			height: 50vh; /* 50% de la altura de la ventana */
-			background: black;
+		}
+
+		.demo-btn {
+			display: flex;
+			align-items: center;
+			text-decoration: none;
+			background: var(--surface);
+			border: 1px solid var(--border2);
+			border-radius: 10px;
 			overflow: hidden;
-			border-radius: 12px;
+			transition: border-color 0.25s, transform 0.2s, box-shadow 0.25s;
 			position: relative;
 		}
-		video {
-			top: 0;
-			left: 0;
-			display: block;
-			width: 100%; /* Hace que el video llene todo el contenedor horizontalmente */
-		    height: 100%; /* Hace que el video llene todo el contenedor verticalmente */
-			object-fit: fill; /* fuerza el estirado */
+
+		.demo-btn::before {
+			content: '';
 			position: absolute;
+			top: 0; left: 0; bottom: 0;
+			width: 3px;
 		}
-		canvas {
-			top: 0;
-			left: 0;
-			display: block;
-			width: 100%;
-			height: 100%;
-			pointer-events: none;
-			position: absolute;
+
+		.demo-btn.v1::before { background: var(--dim); }
+		.demo-btn.v2::before { background: var(--amber); }
+		.demo-btn.v3::before { background: var(--accent); }
+		.demo-btn.v4::before { background: var(--green); }
+
+		.demo-btn.v1:hover { border-color: var(--dim);    box-shadow: 0 0 20px rgba(147,152,157,0.08); transform: translateX(3px); }
+		.demo-btn.v2:hover { border-color: var(--amber);  box-shadow: 0 0 20px rgba(245,166,35,0.08);  transform: translateX(3px); }
+		.demo-btn.v3:hover { border-color: var(--accent); box-shadow: 0 0 20px rgba(0,212,255,0.08);   transform: translateX(3px); }
+		.demo-btn.v4:hover { border-color: var(--green);  box-shadow: 0 0 20px rgba(45,255,126,0.08);  transform: translateX(3px); }
+
+		/* left: version tag */
+		.demo-btn-ver {
+			flex-shrink: 0;
+			width: 72px;
+			padding: 22px 12px;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			border-right: 1px solid var(--border2);
+			font-family: var(--mono);
 		}
-		/* Controles de cámara */
-		#cameraControls {
-			max-width: 600px;
-			margin: 5px auto;
+
+		.ver-tag {
+			font-size: 12px;
+			font-weight: 700;
+			letter-spacing: 1px;
+		}
+
+		.demo-btn.v1 .ver-tag { color: var(--dim); }
+		.demo-btn.v2 .ver-tag { color: var(--amber); }
+		.demo-btn.v3 .ver-tag { color: var(--accent); }
+		.demo-btn.v4 .ver-tag { color: var(--green); }
+
+		.ver-num {
+			font-size: 9px;
+			color: var(--dim);
+			letter-spacing: 1px;
+		}
+
+		/* center: text */
+		.demo-btn-body {
+			flex: 1;
+			padding: 16px 20px;
+			display: flex;
+			flex-direction: column;
+			gap: 6px;
+		}
+
+		.demo-btn-title {
+			font-family: var(--sans);
+			font-size: 15px;
+			font-weight: 700;
+			color: var(--white);
+			letter-spacing: -0.2px;
+			line-height: 1.2;
+		}
+
+		.demo-btn-sub {
+			font-family: var(--mono);
+			font-size: 10px;
+			color: var(--mid);
+			letter-spacing: 1.5px;
+			text-transform: uppercase;
+		}
+
+		.demo-btn-badges {
 			display: flex;
 			flex-wrap: wrap;
-			gap: 12px;
-			justify-content: center;
+			gap: 4px;
+			margin-top: 4px;
 		}
-		#cameraControls > div {
+
+		.dbadge {
+			font-family: var(--mono);
+			font-size: 9px;
+			font-weight: 500;
+			letter-spacing: 0.4px;
+			padding: 2px 7px;
+			border-radius: 3px;
+			border: 1px solid;
+			white-space: nowrap;
+			text-transform: uppercase;
+		}
+
+		.dbadge.b-dim    { border-color: var(--border2);              color: var(--dim);    background: transparent; }
+		.dbadge.b-accent { border-color: rgba(0,212,255,0.3);         color: var(--accent); background: rgba(0,212,255,0.05); }
+		.dbadge.b-green  { border-color: rgba(45,255,126,0.3);        color: var(--green);  background: rgba(45,255,126,0.05); }
+		.dbadge.b-amber  { border-color: rgba(245,166,35,0.3);        color: var(--amber);  background: rgba(245,166,35,0.05); }
+
+		/* ── BADGES ── */
+		.badges {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 5px;
+		}
+
+		.badge {
+			font-family: var(--mono);
+			font-size: 9px;
+			font-weight: 500;
+			letter-spacing: 0.5px;
+			padding: 2px 8px;
+			border-radius: 3px;
+			border: 1px solid;
+			white-space: nowrap;
+			text-transform: uppercase;
+		}
+
+		.badge.layer  { border-color: var(--accent);  color: var(--accent);  background: rgba(0,229,255,0.06); }
+		.badge.module { border-color: var(--amber);   color: var(--amber);   background: rgba(255,179,0,0.06); }
+		.badge.feat   { border-color: var(--green);   color: var(--green);   background: rgba(57,255,20,0.06); }
+		.badge.dim    { border-color: var(--dim);     color: var(--dim);     background: transparent; }
+
+		/* right: arrow */
+		.demo-btn-arrow {
+			flex-shrink: 0;
+			padding: 0 20px;
+			font-size: 18px;
+			color: var(--dim);
+			transition: color 0.2s, transform 0.2s;
+		}
+
+		.demo-btn.v1:hover .demo-btn-arrow { color: var(--dim);    transform: translateX(3px); }
+		.demo-btn.v2:hover .demo-btn-arrow { color: var(--amber);  transform: translateX(3px); }
+		.demo-btn.v3:hover .demo-btn-arrow { color: var(--accent); transform: translateX(3px); }
+		.demo-btn.v4:hover .demo-btn-arrow { color: var(--green);  transform: translateX(3px); }
+
+		.demo-btn.active {
+			border: 3px solid var(--green);
+		}
+
+		/* ══════════════════════════════════════
+		TIMELINE CON ACORDEÓN
+		══════════════════════════════════════ */
+		.timeline {
+			display: flex;
+			flex-direction: column;
+		}
+
+		.tl-item {
+			display: grid;
+			grid-template-columns: 56px 20px 1fr;
+			gap: 0 20px;
+			align-items: stretch;
+		}
+
+		.tl-version {
+			font-family: var(--mono);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 2px;
+			color: var(--dim);
+			text-align: right;
+			padding-top: 4px;
+		}
+
+		.tl-line-wrap {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+		}
+
+		.tl-dot {
+			width: 10px; height: 10px;
+			border-radius: 50%;
+			border: 2px solid;
+			flex-shrink: 0;
+			margin-top: 2px;
+		}
+
+		.tl-connector {
+			width: 1px;
 			flex: 1;
-			min-width: 140px;
+			min-height: 24px;
+			background: var(--border2);
 		}
-		/* Botones */
-		button, select, input[type=range] {
-			padding: 10px 14px;
-			font-size: 16px;
-			border-radius: 8px;
-			border: none;
-			outline: none;
-			background: #444;
-			color: #eee;
+
+		.tl-item:last-child .tl-connector { display: none; }
+
+		.tl-item.v1 .tl-dot { border-color: var(--dim);   background: transparent; }
+		.tl-item.v2 .tl-dot { border-color: var(--amber); background: rgba(245,166,35,0.2); }
+		.tl-item.v3 .tl-dot { border-color: var(--accent); background: rgba(0,212,255,0.2); }
+		.tl-item.v4 .tl-dot { border-color: var(--green); background: rgba(45,255,126,0.2); }
+
+		.tl-content {
+			padding-bottom: 36px;
+		}
+
+		/* título clickable del acordeón */
+		.tl-summary {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: 12px;
 			cursor: pointer;
-			width: 100%; /* full en móvil */
-			box-sizing: border-box;
+			user-select: none;
+			padding: 2px 0 12px;
 		}
-		label {
-			display: block;
-			font-size: 14px;
-			margin-bottom: 4px;
-			text-align:center;
+
+		.tl-summary:hover .tl-title { color: var(--white); }
+
+		.tl-title {
+			font-family: var(--sans);
+			font-size: 13px;
+			font-weight: 700;
+			color: var(--text);
+			line-height: 1.3;
+			transition: color 0.2s;
 		}
-		#cameraMessages {
-			margin-top: 5px;
-			color: #ff6666;
-			font-size: 14px;
-			min-height: 20px;
+
+		.tl-chevron {
+			flex-shrink: 0;
+			width: 16px; height: 16px;
+			transition: transform 0.25s;
 		}
-		/* ******* INFO CAMARA ******* */
-		#infoButton {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 999;
-            background: #444;
-            color: #eee;
-            border-radius: 50%;
-            border: none;
-            width: 70px;
-            height: 70px;
-            font-size: 32px;
-            cursor: pointer;
+
+		.tl-item.v1 .tl-chevron { color: var(--dim); }
+		.tl-item.v2 .tl-chevron { color: var(--amber); }
+		.tl-item.v3 .tl-chevron { color: var(--accent); }
+		.tl-item.v4 .tl-chevron { color: var(--green); }
+
+		.tl-chevron.rotated { transform: rotate(180deg); }
+
+		/* body colapsable */
+		.tl-body {
+			overflow: hidden;
+			max-height: 0;
+			opacity: 0;
+			transition: max-height 0.35s ease, opacity 0.25s ease;
 		}
-		/* Panel de información: adaptar tamaño */
-		#cameraInfo {
-			position: fixed;
-			top: 80px;
-			right: 20px;
-			width: 300px;
-			background: #333;
-			color: #eee;
+
+		.tl-body.open {
+			max-height: 600px;
+			opacity: 1;
+		}
+
+		.tl-desc {
+			font-family: var(--mono);
+			font-size: 11px;
+			font-weight: 300;
+			color: var(--mid);
+			line-height: 1.85;
+			margin-bottom: 16px;
+		}
+
+		.tl-desc strong { color: var(--text); font-weight: 500; }
+
+		.tl-modules {
+			border-top: 1px solid var(--border2);
+			padding-top: 12px;
+			display: flex;
+			flex-direction: column;
+			gap: 7px;
+			padding-bottom: 4px;
+		}
+
+		.mod-row {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			font-family: var(--mono);
+			font-size: 11px;
+		}
+
+		.mod-dot {
+			width: 5px; height: 5px;
+			border-radius: 50%;
+			flex-shrink: 0;
+		}
+
+		.mod-name { color: var(--white); font-weight: 500; }
+		.mod-desc { color: var(--dim); }
+
+		/* ── ARCH BOX ── */
+		.arch-box {
+			background: var(--surface);
+			border: 1px solid var(--border2);
 			border-radius: 12px;
-			padding: 16px;
-			box-shadow: 0 0 10px rgba(0,0,0,0.7);
-			display: none;
-			z-index: 998;
-		}
-		#cameraInfo > h3 {
-			margin-top:0;
-		}
-		#closeCameraInfo {
-			margin-top: 12px;
-			padding: 6px 12px;
-			border-radius: 8px;
-			cursor: pointer;
-			border: none;
-			background: #555;
-			background-color: #007bff;
-			color: #eee;
+			padding: 28px 28px 24px;
 		}
 
-		/* ==== MEDIA QUERIES ==== */
+		.arch-title {
+			font-family: var(--mono);
+			font-size: 10px;
+			font-weight: 700;
+			letter-spacing: 2px;
+			text-transform: uppercase;
+			color: var(--accent);
+			margin-bottom: 20px;
+		}
 
-		/* 📱 Teléfonos (pantallas < 600px) */
+		.arch-pipeline {
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 8px;
+			margin-bottom: 20px;
+		}
+
+		.arch-node {
+			font-family: var(--mono);
+			font-size: 11px;
+			font-weight: 500;
+			padding: 8px 14px;
+			border-radius: 6px;
+			border: 1px solid var(--border2);
+			background: var(--surface2);
+			color: var(--text);
+			white-space: nowrap;
+		}
+
+		.arch-node.accent { border-color: rgba(0,212,255,0.4);  color: var(--accent); background: rgba(0,212,255,0.05); }
+		.arch-node.amber  { border-color: rgba(245,166,35,0.4);  color: var(--amber);  background: rgba(245,166,35,0.05); }
+		.arch-node.green  { border-color: rgba(45,255,126,0.4); color: var(--green);  background: rgba(45,255,126,0.05); }
+
+		.arch-arrow { color: var(--dim); font-size: 16px; }
+
+		.arch-note {
+			font-family: var(--mono);
+			font-size: 11px;
+			font-weight: 300;
+			color: var(--mid);
+			line-height: 1.8;
+			border-top: 1px solid var(--border2);
+			padding-top: 16px;
+		}
+
+		.arch-note strong { color: var(--text); font-weight: 500; }
+
+		/* ── FOOTER ── */
+		footer {
+			border-top: 1px solid var(--border2);
+			padding: 28px 0 48px;
+			display: flex;
+			align-items: flex-start;
+			justify-content: space-between;
+			gap: 16px;
+			flex-wrap: wrap;
+		}
+
+		.footer-left {
+			font-family: var(--mono);
+			font-size: 11px;
+			color: var(--mid);
+			line-height: 1.9;
+		}
+
+		.footer-left a { color: var(--accent); text-decoration: none; }
+		.footer-left a:hover { text-decoration: underline; }
+
+		.footer-quote {
+			font-family: var(--mono);
+			font-size: 11px;
+			color: var(--mid);
+			font-style: italic;
+			max-width: 320px;
+			text-align: right;
+			line-height: 1.7;
+		}
+
+		/* ── RESPONSIVE ── */
 		@media (max-width: 600px) {
-			#InferenceControls > div {
-				flex: 1 1 auto;      /* No crecer demasiado, pero sí reducir si es necesario */
-				min-width: 90px;     /* Ancho mínimo para que el contenido quepa */
-				max-width: 120px;    /* Opcional: limitar el ancho máximo */
-			}
-			#cameraControls {
-				display: grid;
-				grid-template-columns: repeat(2, 1fr);
-				gap: px;
-			}
-			#cameravideo {
-				width: 55%; /* 50% */
-				height: 41vh; /* 35vh*/
-			}
-			button, select, input[type=range] {
-				font-size: 14px;
-			}
-			#divzoom {
-				grid-column: 1 / -1; /* hace que ocupe toda la fila */
-				width: 100%;
-			}
-			/* Zoom ocupa toda la fila */
-			#ZoomRangeControl {
-				width: 100%;
-			}
+		header { padding: 40px 0 32px; }
+		.page { padding: 0 16px; }
+		.tl-item { grid-template-columns: 40px 16px 1fr; }
+		.footer-quote { text-align: left; }
+		footer { flex-direction: column; }
+		.demo-btn-ver { width: 56px; padding: 16px 8px; }
 		}
 
-		/* 📲 Tablets (entre 600px y 900px) */
-		@media (min-width: 601px) and (max-width: 900px) {
-			#InferenceControls > div {
-				flex: 1 1 auto;      /* No crecer demasiado, pero sí reducir si es necesario */
-				min-width: 90px;     /* Ancho mínimo para que el contenido quepa */
-				max-width: 120px;    /* Opcional: limitar el ancho máximo */
-			}
-			#cameraControls {
-				display: grid;
-				grid-template-columns: repeat(2, 1fr);
-				gap: px;
-			}
-			#cameravideo {
-				width: 45%; /* 50% */
-				height: 55vh; /* 35vh*/
-			}
-			button, select, input[type=range] {
-				font-size: 14px;
-			}
-			#divzoom {
-				grid-column: 1 / -1; /* hace que ocupe toda la fila */
-				width: 100%;
-			}
-			/* Zoom ocupa toda la fila */
-			#ZoomRangeControl {
-				width: 100%;
-			}
+		.arch-control {
+			display: flex;
+			justify-content: left;   /* antes: left */
+			margin-bottom: 24px;       /* más aire abajo */
 		}
 
-		/* 💻 PC (más de 900px) */
-		@media (min-width: 901px) {
-			h2 {
-				margin-bottom: 0px; /* espacio debajo del título */
-			}
-			#Camera, #InferenceControls {
-				width: 65%;
-			}
-			#cameraControls {
-				display: grid;
-				grid-template-columns: repeat(2, 1fr);
-				gap: 12px;
-			}
-			#divzoom {
-				grid-column: 1 / -1; /* hace que ocupe toda la fila */
-				width: 100%;
-			}
-			/* Zoom ocupa toda la fila */
-			#ZoomRangeControl {
-				width: 100%;
-			}
+		/* centrar contenido interno del nodo */
+		.arch-node.centered {
+			text-align: center;
 		}
 
-		/* 📱 Teléfonos (pantallas < 600px) */
-/*		@media (max-width: 600px) { body { background: #00ff0dff; } }
-		/* 📲 Tablets (entre 600px y 900px) */
-/*		@media (min-width: 601px) and (max-width: 900px) { body { background: #fff200ff; }}
-		/* 💻 PC (más de 900px) */
-/*		@media (min-width: 901px) { body { background: #003cffff; } }
-*/
+		.arch-pipeline.final-row {
+			justify-content: left;
+			gap: 12px;
+			margin-top: 6px;
+		}
+
+		.arch-node {
+			text-align: center;
+			line-height: 1.4;
+		}
+
+		.tl-chevron {
+			font-size: 18px;
+			color: var(--dim);
+			transition: transform 0.25s;
+		}
+
+		.tl-chevron.rotated {
+			transform: rotate(180deg) scale(1.1);
+		}
 	</style>
 </head>
 <body>
-	<h2>WebAI Inference Throttling Demo</h2>
+	<div class="glow-orb"></div>
 
-	<!-- Botón flotante de información -->
-	<button id="infoButton" title="Información de la cámara">ℹ️</button>
+	<div class="page">
 
-	<!-- Panel de información de la cámara -->
-	<div id="cameraInfo">
-		<h3>Info Cámara</h3>
-		<div id="cameraInfoContent"></div>
-		<button id="closeCameraInfo">Cerrar</button>
+		<!-- ── HEADER ── -->
+		<header>
+			<h1>WebAI Inference<br><span>Throttling</span></h1>
+			<p class="header-sub">
+			Arquitectura modular de throttling inteligente para inferencia ML en tiempo real
+			sobre cámara web. Demostración progresiva en 4 versiones.
+			</p>
+		</header>
+
+		<main>
+
+			<!-- ═══════════════════════════════════════
+				DEMOS — botones columna única centrada
+			════════════════════════════════════════ -->
+			<section>
+				<div class="section-label">Demos progresivos</div>
+
+				<div class="demos-list">
+
+					<!-- V1 -->
+					<a class="demo-btn v1" href="src/demo/v1-three-layers/index.html">
+						<div class="demo-btn-ver">
+							<span class="ver-tag">V1</span>
+							<span class="ver-num">3 MOD</span>
+						</div>
+						<div class="demo-btn-body">
+							<div class="demo-btn-title">Manual throttling · 3 layers</div>
+							<div class="demo-btn-sub">V1 · Prototipo inicial</div>
+							<div class="badges">
+								<span class="badge layer">3 Capas</span>
+								<span class="badge dim">Throttling manual</span>
+								<span class="badge dim">Select FPS</span>
+								<span class="badge dim">Canvas básico</span>
+							</div>
+						</div>
+						<div class="demo-btn-arrow">▶</div>
+					</a>
+
+					<!-- V2 -->
+					<a class="demo-btn v2" href="src/demo/v2-four-layers/index.html">
+						<div class="demo-btn-ver">
+							<span class="ver-tag">V2</span>
+							<span class="ver-num">4 MOD</span>
+						</div>
+						<div class="demo-btn-body">
+							<div class="demo-btn-title">Auto FPS · 4 layers</div>
+							<div class="demo-btn-sub">V2 · Four layers</div>
+							<div class="badges">
+							<span class="badge layer">4 Capas</span>
+							<span class="badge feat">Throttling AUTO</span>
+							<span class="badge feat">Calibración warmup 3 runs</span>
+							<span class="badge module">PredictionProcessor</span>
+							<span class="badge dim">HiDPI canvas</span>
+							</div>
+						</div>
+						<div class="demo-btn-arrow">▶</div>
+					</a>
+
+					<!-- V3 -->
+					<a class="demo-btn v3" href="src/demo/v3-vectordiff/index.html">
+						<div class="demo-btn-ver">
+							<span class="ver-tag">V3</span>
+							<span class="ver-num">5 MOD</span>
+						</div>
+						<div class="demo-btn-body">
+							<div class="demo-btn-title">Skip redraw · CPU optimization</div>
+							<div class="demo-btn-sub">V3 · Vector diff</div>
+							<div class="badges">
+							<span class="badge layer">4 Capas</span>
+							<span class="badge feat">Throttling AUTO</span>
+							<span class="badge feat">Calibración warmup</span>
+							<span class="badge module">VectorProcessor</span>
+							<span class="badge dim">Diff por índice</span>
+							<span class="badge dim">HiDPI canvas</span>
+							<span class="badge dim">Skip redraw</span>
+							</div>
+						</div>
+						<div class="demo-btn-arrow">▶</div>
+					</a>
+
+					<!-- V4 -->
+					<a class="demo-btn v4 active" href="src/demo/v4-ioutracker/index.html">
+						<div class="demo-btn-ver">
+							<span class="ver-tag">V4</span>
+							<span class="ver-num">5 MOD</span>
+						</div>
+						<div class="demo-btn-body">
+							<div class="demo-btn-title">Persistent ID · Object tracking</div>
+							<div class="demo-btn-sub">V4 · IoU Tracker</div>
+							<div class="badges">
+							<span class="badge layer">4 Capas</span>
+							<span class="badge feat">Throttling AUTO</span>
+							<span class="badge feat">IoU Tracking</span>
+							<span class="badge feat">ID persistente</span>
+							<span class="badge module">stableFrames</span>
+							<span class="badge module">MAX_AGE</span>
+							<span class="badge dim">Fallback centroide</span>
+							<span class="badge dim">HiDPI canvas</span>
+							</div>
+						</div>
+						<div class="demo-btn-arrow">▶</div>
+					</a>
+
+				</div>
+			</section>
+
+			<!-- ═══════════════════════════════════════
+				EVOLUTION TIMELINE + ACORDEÓN
+			════════════════════════════════════════ -->
+			<section>
+				<div class="section-label">Evolución del proyecto</div>
+				<div class="timeline">
+
+					<!-- V1 -->
+					<div class="tl-item v1">
+						<div class="tl-version">V1</div>
+							<div class="tl-line-wrap">
+								<div class="tl-dot"></div>
+								<div class="tl-connector"></div>
+							</div>
+						<div class="tl-content">
+							<div class="tl-summary" onclick="toggleAcc(this)">
+								<div class="tl-title">Prototipo inicial — 3 capas — Throttling básico por frames</div>
+								<div class="tl-chevron">▼</div>
+							</div>
+							<div class="tl-body">
+								<p class="tl-desc">
+									Arquitectura inicial de <strong>3 capas</strong> funcional. El throttling es manual por
+									<strong>select FPS</strong>: el usuario selecciona la cantidad de FPS desde un
+									<strong>&lt;select&gt;</strong>. Renderizado de bounding boxes con
+									<strong>PredictionProcessor</strong> — comparación directa frame a frame, sin diff
+									inteligente. Objetivo: validar que el pipeline cámara → modelo → canvas era viable en browser.
+								</p>
+								<div class="tl-modules">
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">VideoController</span>
+										<span class="mod-desc">— Cámara, zoom, linterna</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">ModelController</span>
+										<span class="mod-desc">— Inferencia coco-ssd + RAF</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">PredictionProcessor</span>
+										<span class="mod-desc">— Render directo en canvas</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- V2 -->
+					<div class="tl-item v2">
+						<div class="tl-version">V2</div>
+						<div class="tl-line-wrap">
+							<div class="tl-dot"></div>
+							<div class="tl-connector"></div>
+						</div>
+						<div class="tl-content">
+							<div class="tl-summary" onclick="toggleAcc(this)">
+								<div class="tl-title">Arquitectura de 4 capas — ThrottleController</div>
+								<div class="tl-chevron">▼</div>
+							</div>
+							<div class="tl-body">
+								<p class="tl-desc">
+									Refactorización completa hacia <strong>4 capas</strong>. Se extrae el control de inferencia
+									a <strong>ThrottleController</strong>, un módulo dedicado con calibración automática en
+									warmup (3 runs) y ajuste de FPS ±1 por ciclo según presupuesto de CPU.
+									Arquitectura modular definitiva: cada capa reemplazable de forma independiente.
+								</p>
+								<div class="tl-modules">
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">VideoController</span>
+										<span class="mod-desc">— Cámara, zoom, linterna</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--amber)"></div>
+										<span class="mod-name">ThrottleController</span>
+										<span class="mod-desc">— Heurística automática de FPS</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">ModelController</span>
+										<span class="mod-desc">— Inferencia + throttle integrado</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">CanvasRenderer</span>
+										<span class="mod-desc">— Render HiDPI, colores por clase</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- V3 -->
+					<div class="tl-item v3">
+						<div class="tl-version">V3</div>
+						<div class="tl-line-wrap">
+							<div class="tl-dot"></div>
+							<div class="tl-connector"></div>
+						</div>
+						<div class="tl-content">
+							<div class="tl-summary" onclick="toggleAcc(this)">
+								<div class="tl-title">Optimización de render — VectorProcessor + diff</div>
+								<div class="tl-chevron">▼</div>
+							</div>
+							<div class="tl-body">
+								<p class="tl-desc">
+									Se inserta <strong>VectorProcessor</strong> entre ModelController y CanvasRenderer.
+									Compara vectores de predicción por índice entre frames y bloquea draws cuando
+									no hay cambios reales. Si el frame no cambió, el render se omite completamente.
+									Primera optimización real de CPU para dispositivos de gama baja.
+								</p>
+								<div class="tl-modules">
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">VideoController</span>
+										<span class="mod-desc">— Cámara, zoom, linterna</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--amber)"></div>
+										<span class="mod-name">ThrottleController</span>
+										<span class="mod-desc">— Heurística automática de FPS</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">ModelController</span>
+										<span class="mod-desc">— Inferencia + throttle integrado</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">VectorProcessor</span>
+										<span class="mod-desc">— Diff por índice, sin redraws</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">CanvasRenderer</span>
+										<span class="mod-desc">— Render HiDPI, colores por clase</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- V4 -->
+					<div class="tl-item v4">
+						<div class="tl-version">V4</div>
+						<div class="tl-line-wrap">
+							<div class="tl-dot"></div>
+							<div class="tl-connector"></div>
+						</div>
+						<div class="tl-content">
+							<div class="tl-summary" onclick="toggleAcc(this)">
+								<div class="tl-title">Object Tracking real — IoU + identidad persistente</div>
+								<div class="tl-chevron">▼</div>
+							</div>
+							<div class="tl-body">
+								<p class="tl-desc">
+									VectorProcessor evoluciona a un <strong>Object Tracker</strong> real.
+									Cada objeto detectado recibe una identidad persistente (<strong>#id</strong>)
+									entre frames. Matching via <strong>Intersection over Union (IoU)</strong>
+									con fallback por distancia euclidiana de centroides.
+									Los objetos envejecen via <strong>MAX_AGE</strong> y desaparecen si no son vistos.
+								</p>
+								<div class="tl-modules">
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">VideoController</span>
+										<span class="mod-desc">— Cámara, zoom, linterna</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--amber)"></div>
+										<span class="mod-name">ThrottleController</span>
+										<span class="mod-desc">— Heurística automática de FPS</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">ModelController</span>
+										<span class="mod-desc">— Inferencia + throttle integrado</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--green)"></div>
+										<span class="mod-name">VectorProcessor (IoU)</span>
+										<span class="mod-desc">— Tracker con ID persistente</span>
+									</div>
+									<div class="mod-row">
+										<div class="mod-dot" style="background:var(--accent)"></div>
+										<span class="mod-name">CanvasRenderer</span>
+										<span class="mod-desc">— Render con #id y stableFrames</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+				</div>
+			</section>
+
+			<!-- ═══════════════════════════════════════
+				ARQUITECTURA FINAL
+			════════════════════════════════════════ -->
+			<section>
+				<div class="section-label">Arquitectura final — Pipeline v4</div>
+				<div class="arch-box">
+					<div class="arch-title">// Flujo de datos en producción</div>
+
+					<div class="arch-pipeline">
+						<div class="arch-node amber">ThrottleController
+							<div class="arch-pipeline">
+								<div class="arch-node accent">VideoController</div>
+								<div class="arch-arrow">→</div>
+								<div class="arch-node accent">ModelController</div>
+							</div>
+						</div>
+						<div class="arch-arrow">→</div>
+						<div class="arch-node green">VectorProcessor (IoU)</div>
+						<div class="arch-arrow">→</div>
+						<div class="arch-node accent">CanvasRenderer</div>
+					</div>
+
+					<div class="arch-note">
+						Cada módulo es <strong>independiente y reemplazable</strong> sin modificar el resto del pipeline.<br>
+						<strong>VectorProcessor</strong> actúa como capa de filtrado inteligente: solo dispara el render cuando
+						hay cambios reales entre frames, eliminando draw calls innecesarios y reduciendo consumo de CPU.
+						<strong>ThrottleController</strong> calibra automáticamente el dispositivo y ajusta el FPS dinámicamente
+						según el presupuesto disponible — sin intervención del usuario.
+					</div>
+				</div>
+			</section>
+
+		</main>
+
+		<!-- ── FOOTER ── -->
+		<footer>
+			<div class="footer-left">
+				<strong>WebAI Inference Throttling</strong><br>
+				<strong>Fernando Flores Alvarado</strong><br>
+				<strong>OWASP Project Leader (México)</strong><br>
+				<strong>fernando.alvarado@owasp.org</strong><br>
+				<strong>fernandofa0306@gmail.com</strong><br>
+			</div>
+			<div class="footer-quote">
+				<br>
+				"Compartir con responsabilidad<br>es inspirar para construir el futuro."
+			</div>
+		</footer>
+
 	</div>
 
-	<!-- Controles Inferencia -->
-	<div id="InferenceControls">
-		<div>
-			<button id="cameraToggleButton">Apagar<br>Cámara</button>
-		</div>
-		<div>
-			<label for="frames">FpS:</label>
-			<select id="frames">
-					<option value="1" selected>1</option> <!-- seleccionado por defecto -->
-					<option value="2">2</option>
-					<option value="3">3</option>
-					<option value="4">4</option>
-					<option value="5">5</option>
-					<option value="6">6</option>
-					<option value="7">7</option>
-					<option value="8">8</option>
-					<option value="9">9</option>
-					<option value="10">10</option>
-				</select>
-		</div>
-		<div>
-			<button id="toggleDetectionButton">Apagar<br>Detección</button>
-		</div>
-	</div>
-
-	<div id="Camera">
-		<!-- Video + Canvas Camara -->
-		<div id="cameravideo">
-			<video id="video" autoplay muted playsinline></video>
-			<canvas id="canvas"></canvas>
-		</div>
-
-		<!-- Mensaje Camara-->
-		<div id="cameraMessages"></div>
-
-		<!-- Controles Camara -->
-		<div id="cameraControls">
-			<div>
-				<label for="cameras">Cámara:</label>
-				<select id="cameras"></select>
-			</div>
-			<div>
-				<label for="ToggleTorchButton">Linterna:</label>
-				<button id="ToggleTorchButton">Linterna OFF</button>
-			</div>
-			<div id="divzoom">
-				<label for="ZoomRangeControl">Zoom:</label>
-				<input type="range" id="ZoomRangeControl" min="1" max="5" step="0.1" value="1" />
-			</div>
-		</div>
-	</div>
-
 	<script>
-		// ======================================================
-		// 📦 MÓDULO PROFESIONAL: VideoController
-		// ======================================================
-		/**
-		 * Controlador profesional para manejar video en tiempo real desde la cámara.
-		 * Encapsula el acceso a `getUserMedia`, cambio de cámara, zoom y torch.
-		 * 
-		 * @class VideoController
-		 * @example
-		 * const videoCtrl = new VideoController(document.querySelector("#video"));
-		 * await videoCtrl.init("HD", "environment");
-		 */
-		class VideoController {
-			/**
-			 * @constructor
-			 * @param {HTMLVideoElement} videoElement - Elemento <video> donde se reproducirá el stream.
-			 */
-			constructor(videoElement) {
-				if (!(videoElement instanceof HTMLVideoElement)) throw new Error("Debes pasar un elemento <video> válido.");
-				this.videoElement = videoElement;
-				this.stream = null;
-				this.track = null;
-				this.devices = [];
-
-				// Callbacks configurables
-				/** @type {Function|null} Ejecutado cuando el stream está listo */
-				this.onReady = null;
-				/** @type {Function|null} Ejecutado cuando ocurre un error */
-				this.onError = null;
-				/** @type {Function|null} Ejecutado cuando se detectan dispositivos */
-				this.onDevices = null;
-
-				// Estado interno
-				this.currentDeviceId = null;
-				this.torchEnabled = false;
-				this.zoomSupported = false;
-				this.torchSupported = false;
-			}
-
-			/**
-			 * Verifica si el navegador soporta MediaDevices.
-			 * @returns {boolean}
-			 */
-			static isSupported() {
-				return 'mediaDevices' in navigator && 'getUserMedia' in navigator.mediaDevices;
-			}
-
-			/**
-			 * Obtiene la lista de cámaras disponibles.
-			 * @returns {Promise<MediaDeviceInfo[]>}
-			 */
-			async getDevices() {
-				try {
-					const devices = await navigator.mediaDevices.enumerateDevices();
-					this.devices = devices.filter(d => d.kind === "videoinput");
-					if (this.onDevices) this.onDevices(this.devices);
-					return this.devices;
-				} catch (err) {
-					this._handleError(err, "Enumerando dispositivos");
-					throw err;
-				}
-			}
-
-			/**
-			 * Inicializa la cámara.
-			 * @param {"QVGA"|"VGA"|"HD"|"FullHD"|"4K"} resolutionType - Resolución deseada.
-			 * @param {"user"|"environment"} facingMode - Orientación: frontal o trasera.
-			 */
-			async init(resolutionType = "HD", facingMode = "user") {
-				try {
-					this.stop();
-					const resolution = this._getResolution(resolutionType);
-					const constraints = { audio: false, video: { ...resolution, facingMode: facingMode, zoom: true } };
-
-					this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-					this.videoElement.srcObject = this.stream;
-					this.track = this.stream.getVideoTracks()[0];
-					this.currentDeviceId = this.track.getSettings().deviceId;
-
-					await this._waitForVideoReady();
-					this._updateCapabilities();
-
-					if (this.onReady) this.onReady();
-					await this.getDevices();
-
-				} catch (err) {
-					this._handleError(err, "Inicializando video");
-					throw err;
-				}
-			}
-
-			/**
-			 * Detiene el stream de video y libera memoria.
-			 */
-			stop() {
-				if (this.stream) {
-					this.stream.getTracks().forEach(t => t.stop());
-					this.stream = null;
-					this.track = null;
-				}
-				this.videoElement.srcObject = null;
-			}
-
-			/**
-			 * Cambia a otra cámara por `deviceId`.
-			 * @param {string} deviceId - ID de la cámara destino.
-			 * @param {"QVGA"|"VGA"|"HD"|"FullHD"|"4K"} resolutionType - Resolución deseada.
-			 */
-			async switchCamera(deviceId, resolutionType = "HD") {
-				try {
-					this.stop();
-					const resolution = this._getResolution(resolutionType);
-					const constraints = { audio: false, video: { ...resolution, deviceId: { exact: deviceId }, zoom: true } };
-
-					this.stream = await navigator.mediaDevices.getUserMedia(constraints);
-					this.videoElement.srcObject = this.stream;
-					this.track = this.stream.getVideoTracks()[0];
-					this.currentDeviceId = this.track.getSettings().deviceId;
-
-					await this._waitForVideoReady();
-					this._updateCapabilities();
-
-					if (this.onReady) this.onReady();
-				} catch (err) {
-					this._handleError(err, "Cambiando cámara");
-					throw err;
-				}
-			}
-
-			/**
-			 * Indica si la cámara soporta zoom.
-			 * @returns {boolean}
-			 */
-			isZoomSupported() {
-				return !!(this.track && this.zoomSupported);
-			}
-
-			/**
-			 * Obtiene la configuración de zoom disponible.
-			 * @returns {Object|null} { min, max, step, value } o null si no es soportado.
-			 */
-			getZoomConfiguration() {
-				if (!this.track || !this.zoomSupported) return null;
-				const caps = this.track.getCapabilities();
-				const settings = this.track.getSettings();
-				if (caps.zoom) return { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.1, value: settings.zoom || caps.zoom.min };
-				return null;
-			}
-
-			/**
-			 * Aplica zoom en la cámara.
-			 * @param {number} value - Nivel de zoom.
-			 */
-			async setZoom(value) {
-				if (!this.track || !this.zoomSupported) return;
-				try {
-					await this.track.applyConstraints({ advanced: [{ zoom: value }] });
-				} catch (err) {
-					this._handleError(err, "Aplicando zoom");
-				}
-			}
-
-			/**
-			 * Indica si la cámara soporta linterna (torch).
-			 * @returns {boolean}
-			 */
-			isTorchSupported() {
-				return !!(this.track && this.torchSupported);
-			}
-
-			/**
-			 * Activa/desactiva la linterna del dispositivo.
-			 * @returns {Promise<boolean>} Estado actual de la linterna.
-			 */
-			async toggleTorch() {
-				if (!this.track || !this.torchSupported) return false;
-				try {
-					this.torchEnabled = !this.torchEnabled;
-					await this.track.applyConstraints({ advanced: [{ torch: this.torchEnabled }] });
-					return this.torchEnabled;
-				} catch (err) {
-					this._handleError(err, "Cambiando torch");
-					return false;
-				}
-			}
-
-			/**
-			 * Verifica si la cámara está activa y el stream de video está disponible para reproducirse.
-			 * Este estado indica que se puede encender/apagar la cámara o cambiar de dispositivo.
-			 * No asegura que el video ya haya renderizado ningún frame.
-			 * 
-			 * @returns {boolean} `true` si la cámara está encendida y el track existe.
-			 */
-			// La cámara está encendida, el stream y el track existen.
-			isReady() {
-				return !!(this.stream && this.track);
-			}
-
-			/**
-			 * Verifica si el video ha renderizado al menos un frame y está listo para usar.
-			 * Útil para operaciones que dependen de que el video tenga tamaño real, 
-			 * como dibujar sobre un canvas o aplicar inferencias de ML.
-			 * 
-			 * @returns {boolean} `true` si el video tiene datos renderizados.
-			 */
-			// El video ya tiene datos renderizados y se puede usar en canvas
-			isRendered() {
-				// Eso está bien, pero puede fallar en algunos navegadores
-				// si el video está en autoplay con muted
-/*
-				return (
-					this.videoElement &&
-					!this.videoElement.paused &&
-					!this.videoElement.ended &&
-					this.videoElement.videoWidth > 0 &&
-					this.videoElement.videoHeight > 0
-				);
-//*/
-				// Es Mejor utilizar : (readyState >= 2 = HAVE_CURRENT_DATA).
-//				return this.stream && this.track && this.videoElement.readyState >= 2;
-				return this.videoElement && this.videoElement.readyState >= 2; // HAVE_CURRENT_DATA
-			}
-
-			// ================== MÉTODOS PRIVADOS ==================
-
-			/**
-			 * Maneja errores internos del módulo.
-			 * @param {Error} err - Error capturado.
-			 * @param {string} ctx - Contexto opcional.
-			 * @private
-			 */
-			_handleError(err, ctx = "") {
-				console.error("VideoController Error:", ctx, err);
-				if (this.onError) this.onError(err);
-			}
-
-			/**
-			 * Actualiza las capacidades soportadas por la cámara: zoom y torch.
-			 * @private
-			 */
-			_updateCapabilities() {
-				if (!this.track || typeof this.track.getCapabilities !== "function") return;
-				const caps = this.track.getCapabilities();
-				this.zoomSupported = "zoom" in caps;
-				this.torchSupported = "torch" in caps;
-			}
-
-			/**
-			 * Retorna la resolución ideal según el tipo seleccionado.
-			 * @param {string} type - Tipo de resolución: "QVGA"|"VGA"|"HD"|"FullHD"|"4K".
-			 * @returns {{width: {ideal: number}, height: {ideal: number}}}
-			 * @private
-			 */
-			_getResolution(type) {
-				const resolutions = {
-					"QVGA": { width: { ideal: 320 }, height: { ideal: 240 } },
-					"VGA": { width: { ideal: 640 }, height: { ideal: 480 } },
-					"HD": { width: { ideal: 1280 }, height: { ideal: 720 } },
-					"FullHD": { width: { ideal: 1920 }, height: { ideal: 1080 } },
-					"4K": { width: { ideal: 3840 }, height: { ideal: 2160 } }
-				};
-				return resolutions[type] || resolutions["HD"];
-			}
-
-			/**
-			 * Retorna una promesa que se resuelve cuando el video está listo para reproducirse.
-			 * @returns {Promise<void>}
-			 * @private
-			 */
-			_waitForVideoReady() {
-				return new Promise((resolve, reject) => {
-					const onCanPlay = () => { cleanup(); resolve(); };
-					const onError = (e) => { cleanup(); reject(e); };
-					const cleanup = () => {
-						this.videoElement.removeEventListener("canplay", onCanPlay);
-						this.videoElement.removeEventListener("error", onError);
-					};
-					this.videoElement.addEventListener("canplay", onCanPlay, { once: true });
-					this.videoElement.addEventListener("error", onError, { once: true });
-				});
-			}
+		function toggleAcc(summary) {
+			const body = summary.nextElementSibling;
+			const chevron = summary.querySelector('.tl-chevron');
+			const isOpen = body.classList.contains('open');
+			body.classList.toggle('open', !isOpen);
+			chevron.classList.toggle('rotated', !isOpen);
 		}
-	</script>
-
-
-	<script>
-		// ======================================================
-		// 📦 MÓDULO PROFESIONAL: ModelController
-		// ======================================================
-		/**
-		 * Controlador profesional para manejar.....
-		 */
-		class ModelController {
-			constructor(videoElement, options = {}) {
-				if (!(videoElement instanceof HTMLVideoElement)) throw new Error("Debes pasar un elemento <video> válido.");
-				this.videoElement = videoElement;
-
-				// Configuración
-				this.model = null;
-				this.modelName = options.modelName || 'coco-ssd';
-				this.throttleFrames = 1; // Inferencia cada n frames
-				this.running = false;
-
-				// Contador de frames
-				this.frameCount = 0;
-
-				// Callback para entregar predicciones
-				this.onPredictions = options.onPredictions || function(preds){};
-
-				// Nuevas clases a filtrar (opcional)
-				// Asegurarse de que filterClasses siempre sea un array
-				this.filterClasses = Array.isArray(options.filterClasses) ? options.filterClasses : null; // ej: ['person','cup','bottle']
-
-				console.log("🧠 ModelController creado");
-			}
-
-			// Carga del modelo
-			async loadModel() {
-				console.log("🔄 Cargando modelo:", this.modelName);
-				if (this.modelName === 'coco-ssd') {
-					this.model = await cocoSsd.load();
-				} else {
-					throw new Error("Modelo no soportado: " + this.modelName);
-				}
-				console.log("✅ Modelo cargado");
-			}
-
-			// Inicia inferencia
-			start() {
-				if (!this.model) throw new Error("Primero debes cargar el modelo con loadModel()");
-				this.running = true;
-				this.frameCount = 0;
-				this._loop();
-			}
-
-			// Detiene inferencia
-			stop() {
-				this.running = false;
-			}
-
-			// Ajusta la frecuencia de inferencia
-			setThrottle(frames) {
-				this.throttleFrames = frames > 0 ? frames : this.throttleFrames;
-			}
-
-			// Bucle interno de inferencia
-			async _loop() {
-				if (!this.running) return;
-
-				this.frameCount++;
-				if (this.frameCount % this.throttleFrames === 0) {
-					if (this.videoElement.readyState >= 2) { // HAVE_CURRENT_DATA
-						try {
-							const predictions = await this.model.detect(this.videoElement);
-							// Filtrar solo las clases deseadas
-							const filterPredictions = this.filterClasses
-								? predictions.filter(p => this.filterClasses.includes(p.class))
-								: predictions;
-							// Enviamos predicciones al callback
-							this.onPredictions(filterPredictions);
-						} catch (err) {
-							console.error("❌ Error en inferencia:", err);
-						}
-					}
-				}
-
-				// requestAnimationFrame para sincronizar con el render del navegador
-				requestAnimationFrame(() => this._loop());
-			}
-		}
-	</script>
-
-
-	<script>
-		// ======================================================
-		// 📦 MÓDULO PROFESIONAL: PredictionProcessor
-		// ======================================================
-		/**
-		 * Controlador profesional para manejar.....
-		 */
-		class PredictionProcessor {
-			constructor(canvasElement) {
-				if (!(canvasElement instanceof HTMLCanvasElement)) throw new Error("Debes pasar un elemento <canvas> válido.");
-				this.canvas = canvasElement;
-				this.ctx = this.canvas.getContext('2d');
-				this.lastPredictions = [];
-			}
-
-			// Compara predicciones actuales con las anteriores
-			hasChanges(predictions) {
-				if (predictions.length !== this.lastPredictions.length) return true;
-
-				for (let i = 0; i < predictions.length; i++) {
-					const curr = predictions[i];
-					const prev = this.lastPredictions[i];
-					if (!prev) return true;
-					if (
-						curr.class !== prev.class ||
-						Math.abs(curr.score - prev.score) > 0.01 ||
-						Math.abs(curr.bbox[0] - prev.bbox[0]) > 1 ||
-						Math.abs(curr.bbox[1] - prev.bbox[1]) > 1 ||
-						Math.abs(curr.bbox[2] - prev.bbox[2]) > 1 ||
-						Math.abs(curr.bbox[3] - prev.bbox[3]) > 1
-					) return true;
-				}
-				return false;
-			}
-
-			// Actualiza las predicciones y decide si dibujar
-			process(predictions) {
-				if (this.hasChanges(predictions)) {
-					this.lastPredictions = predictions.map(p => ({...p})); // copia profunda
-					this.draw(predictions);
-				}
-			}
-
-			// Dibuja predicciones en el canvas
-			draw(predictions) {
-				const ctx = this.ctx;
-				const canvas = this.canvas;
-				ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-				// Asegurar que el canvas siga el tamaño actual del video
-				if (canvas.width !== videoElement.videoWidth || canvas.height !== videoElement.videoHeight) {
-					canvas.width = videoElement.videoWidth;
-					canvas.height = videoElement.videoHeight;
-				}
-
-				predictions.forEach(pred => {
-					const [x, y, width, height] = pred.bbox;
-/*
-					// Escalar según como se estiró el video
-					const newX = x * scaleX;
-					const newY = y * scaleY;
-					const newW = width * scaleX;
-					const newH = height * scaleY;
-//*/
-					ctx.strokeStyle = 'lime';
-					ctx.lineWidth = 3;
-					ctx.strokeRect(x, y, width, height);
-
-					ctx.fillStyle = 'lime';
-					ctx.font = '18px Arial';
-					ctx.fillText(`${pred.class} (${(pred.score*100).toFixed(1)}%)`, x, y > 20 ? y - 5 : y + 20);
-				});
-			}
-		}
-	</script>
-
-
-	<script>
-		// Función para ajustar el canvas al tamaño del video
-		function adjustCanvas() {
-//*
-			canvas.width = videoElement.videoWidth;
-			canvas.height = videoElement.videoHeight;
-			console.log(`Canvas ajustado a: ${canvas.width}x${canvas.height}`);
-//*/
-		}
-	</script>
-
-
-	<script>
-		// ======================================================
-		// 📸 CONEXIÓN DE LOS MÓDULOS
-		//   - VideoController
-		//   - ModelController
-		//   - PredictionProcessor
-		//  CON LA UI
-		// ======================================================
-
-		// Referencias a elementos del DOM
-		const cameraToggleButton = document.getElementById("cameraToggleButton");
-		const videoElement = document.getElementById("video");
-		const cameraMessages = document.getElementById("cameraMessages")
-		const selectCameras = document.getElementById("cameras");
-		const torchBtn = document.getElementById("ToggleTorchButton");
-		const zoomControl = document.getElementById("ZoomRangeControl");
-
-		const frames = document.getElementById("frames");
-		const toggleDetectionButton = document.getElementById("toggleDetectionButton");
-
-// *********************************************************************************************
-		// Instancia del controlador VideoController
-		const videoCtrl = new VideoController(videoElement);
-
-		// Callbacks del módulo
-		videoCtrl.onReady = () => {
-			console.log("✅ Video listo");
-			configureCameraUI();
-			adjustCanvas();
-		};
-
-		videoCtrl.onDevices = (devices) => {
-			selectCameras.innerHTML = "";
-			devices.forEach((d, i) => {
-				const option = document.createElement("option");
-				option.value = d.deviceId;
-				option.textContent = d.label || `Cámara ${i+1}`;
-				// Seleccionamos la cámara actualmente activa
-				if (d.deviceId === videoCtrl.currentDeviceId) {
-					option.selected = true;
-				}
-				selectCameras.appendChild(option);
-			});
-		};
-
-		videoCtrl.onError = (err) => {
-			console.error("❌ Error:", err);
-			cameraMessages.innerHTML = `❌ Error al acceder a la cámara: ${err.message}`;
-		};
-
-		// Inicialización: cámara trasera en HD
-		videoCtrl.init("HD", "environment");
-
-
-// *********************************************************************************************
-		// Instancia del controlador ModelController
-		const modelCtrl = new ModelController(videoElement, {
-			filterClasses: ['cup', 'bottle'], // Filtrar solo estas clases
-			onPredictions: (preds) => {
-				console.log("Predicciones recibidas:", preds);
-				// Aquí enviarías datos a la capa 3
-			}
-		});
-
-		// Cargar modelo y empezar
-		(async () => {
-			await modelCtrl.loadModel();
-			// Configurar fps desde UI
-			modelCtrl.setThrottle(parseInt(frames.value));
-			modelCtrl.start();
-		})();
-
-
-
-		// *********************************************************************************************
-		// Instancia del controlador PredictionProcessor
-		const canvasElement = document.getElementById('canvas');
-		const processor = new PredictionProcessor(canvasElement);
-
-		// Conectar con Capa 2 (ModelController)
-		modelCtrl.onPredictions = (preds) => {
-			console.log("Predicciones recibidas:", preds);
-			// Aquí enviarías datos a la capa 3
-			processor.process(preds);
-		};
-
-
-
-		// ======================================================
-		// EVENTOS DE LA UI
-		// ======================================================
-
-		// Enciende/Apaga cámara
-		cameraToggleButton.addEventListener("click", async () => {
-			if (videoCtrl.isReady()) {
-				videoCtrl.stop();
-			} else {
-				// Si ya había una cámara activa, la usamos; si no, fallback a trasera
-				const olddeviceId = videoCtrl.currentDeviceId || null;
-				if (olddeviceId) {
-					await videoCtrl.switchCamera(olddeviceId, "HD");
-				} else {
-					await videoCtrl.init("HD", "environment");
-				}
-			}
-			configureCameraUI();
-		});
-
-		// Cambio de frame (throttling) dinámicamente según UI
-		frames.onchange = (e) => {
-			modelCtrl.setThrottle(parseInt(e.target.value));
-		};
-
-		// Enciende/Apaga detección
-		toggleDetectionButton.onclick = async () => {
-			if (modelCtrl.running) {
-				modelCtrl.stop();
-				toggleDetectionButton.innerHTML = "Encender<br>Detección";
-			} else {
-				modelCtrl.start();
-				toggleDetectionButton.innerHTML = "Apagar<br>Detección";
-			}
-		};
-
-		// Cambio de cámara
-		selectCameras.onchange = async (e) => {
-			await videoCtrl.switchCamera(e.target.value, "HD");
-			configureCameraUI();
-			adjustCanvas();
-		};
-
-		// Zoom
-		zoomControl.oninput = (e) => {
-			videoCtrl.setZoom(e.target.value);
-		};
-
-		// Torchalert
-		torchBtn.onclick = async () => {
-			const state = await videoCtrl.toggleTorch();
-			torchBtn.textContent = state ? "Linterna ON" : "Linterna OFF";
-		};
-
-
-		// Se detectan cambios dinámicos de dispositivos
-		// Detecta cuando se agregan o quitan cámaras/micrófonos
-		// Ej: Si un usuario conecta o desconecta una cámara externa, enumerateDevices() no
-		// se vuelve a ejecutar automáticamente.
-		navigator.mediaDevices.addEventListener('devicechange', async () => {
-			console.log("🔄 Cambio de dispositivos detectado");
-			await videoCtrl.getDevices(); // Re-obtenemos la lista y actualizamos el select
-		});
-
-	
-		// ======================================================
-		// CONFIGURACION CENTRAL DE LA UI
-		// ======================================================
-		function configureCameraUI() {
-			// Zoom
-			if (videoCtrl.isZoomSupported()) {
-				const zoomConfig = videoCtrl.getZoomConfiguration();
-				if (zoomConfig) {
-					zoomControl.min = zoomConfig.min;
-					zoomControl.max = zoomConfig.max;
-					zoomControl.step = zoomConfig.step;
-					zoomControl.value = zoomConfig.value;
-					zoomControl.disabled = false;
-					console.log("🔍 Zoom configurado:", zoomConfig);
-				} else {
-					zoomControl.disabled = true;
-					console.warn("⚠️ Este dispositivo no soporta zoom");
-				}
-			} else {
-					zoomControl.disabled = true;
-					// Solo mostrar warning si la cámara está activa y no hay zoom
-        			if (videoCtrl.isReady()) console.warn("⚠️ Este dispositivo no soporta zoom");
-			}
-
-			// Torch
-			torchBtn.disabled = !videoCtrl.isTorchSupported();
-
-			// Botón toggle
-			cameraToggleButton.innerHTML  = videoCtrl.isReady()
-				? "Apagar<br>Cámara"
-				: "Encender<br>Cámara";
-
-			// Cambio de cámara
-			selectCameras.disabled = !videoCtrl.isReady();
-
-
-			// Abilita/Desabilita Select de frame (throttling)
-			frames.disabled  = videoCtrl.isReady()
-				? false
-				: true;
-
-			// Abilita/Desabilita Boton detección
-			toggleDetectionButton.disabled  = videoCtrl.isReady()
-				? false
-				: true;
-		}
-
-		window.addEventListener("resize", () => {
-			if (videoCtrl.isReady()) adjustCanvas();
-		});
-
-		window.addEventListener("orientationchange", () => {
-			setTimeout(() => {
-				if (videoCtrl.isReady()) adjustCanvas();
-			}, 300); // pequeño delay para dejar que el video se reajuste
-		});
-
-	</script>
-
-
-	<script>
-		const infoButton = document.getElementById("infoButton");
-		const cameraInfo = document.getElementById("cameraInfo");
-		const closeCameraInfo = document.getElementById("closeCameraInfo");
-
-		// Mostrar panel al hacer click en el botón
-		infoButton.addEventListener("click", () => {
-			// Obtener información
-			const zoomConfig = videoCtrl.getZoomConfiguration();
-			const resolution = videoElement.videoWidth + "x" + videoElement.videoHeight;
-			const zoomSupported = zoomConfig ? "Sí" : "No";
-			const torchSupported = videoCtrl.isTorchSupported() ? "Sí" : "No";
-			const deviceId = videoCtrl.currentDeviceId || "-";
-
-			// Construir dinámicamente el contenido
-			const contentHTML = `
-				<p>Resolución: <span>${resolution}</span></p>
-				<p>Zoom soportado: <span>${zoomSupported}</span></p>
-				<p>Torch soportada: <span>${torchSupported}</span></p>
-				<p>Dispositivo activo: <span>${deviceId}</span></p>
-			`;
-			document.getElementById("cameraInfoContent").innerHTML = contentHTML;
-
-			// Mostrar panel
-			cameraInfo.style.display = "block";
-		});
-
-		// Ocultar panel al cerrar
-		closeCameraInfo.addEventListener("click", () => {
-			cameraInfo.style.display = "none";
-		});
-	</script>
-
-	<script>
-/*
-
-		// INICIO
-
-		document.addEventListener("DOMContentLoaded", function() {
-			// Tu código aquí
-		});
-		document.addEventListener("DOMContentLoaded", () => {
-			// Tu código aquí
-		});
-//*/
 	</script>
 
 </body>

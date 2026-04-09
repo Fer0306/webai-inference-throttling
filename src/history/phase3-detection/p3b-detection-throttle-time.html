@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — History Phase 3b (Time Throttle)
+	---------------------------------------------------------------
+
+	Descripción:
+		Optimización de inferencia mediante throttling basado en tiempo.
+		Reduce la frecuencia de ejecución del modelo para mejorar
+		rendimiento y consumo de recursos.
+
+	Contexto:
+		Phase 3b — Introducción de control de frecuencia.
+		Se limita la inferencia a intervalos definidos en milisegundos.
+
+	Características clave:
+		- Throttling basado en tiempo (~150ms)
+		- Reducción de carga de CPU/GPU
+		- Comparación con historial de detecciones
+		- Renderizado condicional (solo si hay cambios)
+		- Resolución reducida para eficiencia
+
+	Archivo:
+		src/history/phase3-detection/p3b-detection-throttle-time.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT + CC BY 4.0
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="UTF-8" />
+	<title>Phase 3b — Time Throttling (Optimización inicial)</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		#contenedor {
+			position: relative;
+			width: 320px;
+			height: 240px;
+		}
+		video, canvas {
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+	</style>
+</head>
+<body>
+	<h2>Phase 3b — Throttling por Tiempo</h2>
+	<div id="contenedor">
+		<video id="video" width="320" height="240" autoplay muted></video>
+		<canvas id="canvas" width="320" height="240"></canvas>
+	</div>
+
+	<script>
+		const video = document.getElementById('video');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+		let modelo;
+		let deteccionesAnteriores = [];
+
+		function sonCajasSimilares(caja1, caja2, tolerancia = 10) {
+			for (let i = 0; i < 4; i++) {
+				if (Math.abs(caja1[i] - caja2[i]) > tolerancia) return false;
+			}
+			return true;
+		}
+
+		function yaFueDetectada(nueva, anteriores) {
+			return anteriores.some(ant =>
+				ant.class === nueva.class && sonCajasSimilares(ant.bbox, nueva.bbox)
+			);
+		}
+
+		function limpiarCajasAntiguas() {
+			if (deteccionesAnteriores.length > 50) {
+				deteccionesAnteriores.splice(0, 20);
+			}
+		}
+
+		function dibujarCaja(b) {
+			const [x, y, w, h] = b.bbox;
+			ctx.strokeStyle = 'lime';
+			ctx.lineWidth = 2;
+			ctx.strokeRect(x, y, w, h);
+			ctx.font = '12px sans-serif';
+			ctx.fillStyle = 'lime';
+			ctx.fillText(`${b.class} (${(b.score * 100).toFixed(1)}%)`, x, y - 5);
+		}
+
+		async function procesarFrame() {
+			if (video.readyState !== 4) {
+				requestAnimationFrame(procesarFrame);
+				return;
+			}
+
+			// 🚀 Solo analizamos cada 3 frames para ahorrar batería
+			const ahora = Date.now();
+			if (!procesarFrame.ultimo || ahora - procesarFrame.ultimo > 150) {
+				procesarFrame.ultimo = ahora;
+
+				const predicciones = await modelo.detect(video);
+				const soloBotellas = predicciones.filter(p => p.class === 'bottle');
+
+				// 💡 Redibujamos solo si hay cambios
+				let hayCambios = false;
+
+				for (let botella of soloBotellas) {
+					if (!yaFueDetectada(botella, deteccionesAnteriores)) {
+						hayCambios = true;
+						deteccionesAnteriores.push(botella);
+					}
+				}
+
+				if (hayCambios) {
+					ctx.clearRect(0, 0, canvas.width, canvas.height);
+					soloBotellas.forEach(dibujarCaja);
+				}
+
+//		        limpiarCajasAntiguas();
+			}
+
+			requestAnimationFrame(procesarFrame);
+		}
+
+		async function iniciar() {
+			// 🔻 Baja resolución de entrada para menor consumo
+			const stream = await navigator.mediaDevices.getUserMedia({
+				video: { width: 320, height: 240 }
+			});
+
+			video.srcObject = stream;
+
+			modelo = await cocoSsd.load();
+			console.log('Modelo cargado');
+			requestAnimationFrame(procesarFrame);
+		}
+
+		iniciar();
+	</script>
+</body>
+</html>

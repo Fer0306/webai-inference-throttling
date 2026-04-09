@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — Phase 4 (Heuristic Module)
+	---------------------------------------------------------------
+
+	Descripción:
+		Módulo avanzado de inferencia en navegador que introduce
+		ajuste dinámico de FPS basado en heurísticas de rendimiento
+		y presupuesto de cómputo.
+
+		Esta versión evoluciona el sistema desde control manual
+		hacia comportamiento adaptativo automático.
+
+	Contexto:
+		Phase 4 — Heuristic Layer
+		Transición de throttling estático a optimización dinámica
+		en tiempo real basada en:
+			- Tiempo de inferencia
+			- Resolución de entrada
+			- Presupuesto de CPU (ms por segundo)
+
+	Características clave:
+		- Calibración inicial del modelo (warmup + medición)
+		- Ajuste automático de FPS (auto-throttling)
+		- Control dinámico basado en budget de inferencia
+		- Reducción de render innecesario (state diff)
+		- Soporte de cámara avanzada:
+			• Selección frontal/trasera
+			• Zoom dinámico
+			• Linterna (torch)
+		- Pausa automática al ocultar la pestaña
+
+	Archivo:
+		src/history/phase4-heuristic/p4-heuristic-module.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT (Código) + CC BY 4.0 (documentación)
+
+	Nota: Este módulo representa la transición hacia sistemas
+		  inteligentes que optimizan recursos en tiempo real
+		  sin intervención manual.
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="utf-8" />
+	<title>Phase 4 — Heuristic Auto-Throttling</title>
+	<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		:root { color-scheme: dark; }
+		body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu; background:#0b0b0b; color:#eaeaea; }
+		header { padding:12px 16px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; justify-content:center; }
+		header > * { margin:4px 0; }
+		#wrap { position:relative; max-width: min(100vw, 100vh*9/16); margin: 0 auto; }
+		video, canvas { width:100%; height:auto; display:block; position:absolute; top:0; left:0; }
+		canvas { pointer-events:none; }
+		.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
+		button, select, input[type="range"] {
+		background:#1e1e1e; color:#eaeaea; border:1px solid #333; border-radius:10px; padding:8px 12px; cursor:pointer;
+		}
+		button:disabled { opacity:0.5; cursor:not-allowed; }
+		#status { font-size:12px; opacity:0.8; text-align:center; padding:4px 0 10px; }
+		#legend { font-size:12px; opacity:0.85; text-align:center; padding:6px 12px; }
+		#legend span { display:inline-block; margin:0 6px; }
+		#legend .key { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+	</style>
+</head>
+<body>
+	<h2>Phase 4 — Heuristic Auto-Throttling</h2>
+	<header>
+		<div class="row">
+			<label>📷 Cámara:</label>
+			<select id="cameraFacing">
+				<option value="environment" selected>Trasera (ideal)</option>
+				<option value="user">Frontal (ideal)</option>
+			</select>
+			<button id="reopen">Re-abrir</button>
+		</div>
+		<div class="row">
+			<button id="torchBtn" disabled>🔦 Linterna</button>
+			<label for="zoom">🔍 Zoom</label>
+			<input id="zoom" type="range" min="1" max="1" step="0.1" value="1" disabled />
+			<span id="zoomVal" aria-live="polite"></span>
+		</div>
+		<div class="row">
+			<label>🎯 FPS inferencia (auto):</label>
+			<span id="fpsAuto">—</span>
+		</div>
+	</header>
+
+	<div id="wrap">
+		<video id="video" autoplay muted playsinline></video>
+		<canvas id="overlay"></canvas>
+	</div>
+
+	<div id="status">Estado: cargando…</div>
+	<div id="legend">
+		<span><span class="key" style="background:#4dff4d"></span>bottle</span>
+		<span><span class="key" style="background:#40c0ff"></span>cup</span>
+		<span><span class="key" style="background:#ffa640"></span>person</span>
+	</div>
+
+	<script>
+		(async () => {
+			// ======== Configuración ========
+			const CLASES_INTERES = ["bottle", "cup", "person"];
+			const COLORS = { bottle:"#4dff4d", cup:"#40c0ff", person:"#ffa640" };
+
+			// Límite superior de "presupuesto" de inferencia (ms) por segundo para ajustar FPS automáticamente
+			const BUDGET_MS_PER_SEC = 200; // aprox. 20% de una CPU de 1s; ajusta si quieres más/menos ahorro
+			const WARMUP_RUNS = 3;         // corridas para medir tiempo medio
+
+			// ======== Elementos ========
+			const video   = document.getElementById('video');
+			const canvas  = document.getElementById('overlay');
+			const ctx     = canvas.getContext('2d');
+			const facingSel = document.getElementById('cameraFacing');
+			const reopenBtn = document.getElementById('reopen');
+			const torchBtn  = document.getElementById('torchBtn');
+			const zoomRange = document.getElementById('zoom');
+			const zoomVal   = document.getElementById('zoomVal');
+			const fpsAutoEl = document.getElementById('fpsAuto');
+			const statusEl  = document.getElementById('status');
+
+			let modelo, stream, track, caps, settings;
+			let deteccionActiva = true;
+			let lastInferMsAvg = 120; // valor por defecto hasta medir
+			let targetFPS = 5;        // se recalcula tras calibración
+			let lastInferTime = 0;
+			let lastDrawState = [];
+			let rafId;
+
+			// ======== Utilidades ========
+			function logStatus(msg) { statusEl.textContent = "Estado: " + msg; }
+
+			function stopStream() {
+				if (stream) stream.getTracks().forEach(t => t.stop());
+				stream = null; track = null; caps = null; settings = null;
+			}
+
+			function setCanvasToVideo(dpr = window.devicePixelRatio || 1) {
+				// asegurar medidas correctas del overlay y nitidez en pantallas HiDPI
+				const vw = video.videoWidth || 640;
+				const vh = video.videoHeight || 480;
+				canvas.width  = Math.round(vw * dpr);
+				canvas.height = Math.round(vh * dpr);
+				canvas.style.width  = vw + "px";
+				canvas.style.height = vh + "px";
+				ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+			}
+
+			function estimateAutoFPS(avgMs, pixCount) {
+				// Heurística:
+				// - más resolución ⇒ menos FPS objetivo
+				// - más ms por inferencia ⇒ menos FPS para mantenerse dentro del presupuesto
+				// presupuesto por segundo / coste por inferencia = inferencias por segundo
+				const budgetFps = Math.max(1, Math.floor(BUDGET_MS_PER_SEC / Math.max(1, avgMs)));
+
+				// penalización por resolución (aprox. escalado vs 720p)
+				const base = 1280*720;
+				const factor = Math.max(0.5, Math.min(1.5, base / Math.max(base, pixCount))); // entre 0.5 y 1.0
+				const fps = Math.max(1, Math.floor(budgetFps * factor));
+
+				return fps;
+			}
+
+			function drawDetections(objs) {
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				for (const o of objs) {
+					const [x, y, w, h] = o.bbox;
+					const c = COLORS[o.class] || "#ffffff";
+					ctx.strokeStyle = c;
+					ctx.lineWidth = 2;
+					ctx.strokeRect(x, y, w, h);
+					ctx.fillStyle = c;
+					ctx.font = "12px system-ui, sans-serif";
+					ctx.fillText(`${o.class} ${(o.score*100).toFixed(1)}%`, x, Math.max(12, y-4));
+				}
+			}
+
+			function arraysDiffer(a, b) {
+				if (a.length !== b.length) return true;
+				// comparación simple por clase y bbox redondeado
+				for (let i=0;i<a.length;i++) {
+					if (a[i].class !== b[i].class) return true;
+					for (let j=0;j<4;j++) {
+						if (Math.abs(a[i].bbox[j] - b[i].bbox[j]) > 10) return true;
+					}
+				}
+				return false;
+			}
+
+			// ======== Cámara ========
+			async function openCamera(facing = "environment") {
+				stopStream();
+				const constraints = {
+					audio: false,
+					video: {
+						facingMode: { ideal: facing },     // frontal/trasera ideal
+						width:     { ideal: 1280 },        // también ideal
+						height:    { ideal: 720 },
+						frameRate: { ideal: 30 }           // hint; real puede variar
+					}
+				};
+				stream = await navigator.mediaDevices.getUserMedia(constraints);
+				video.srcObject = stream;
+				await video.play();
+
+				track    = stream.getVideoTracks()[0];
+				caps     = track.getCapabilities ? track.getCapabilities() : {};
+				settings = track.getSettings ? track.getSettings() : {};
+
+				setCanvasToVideo();
+
+				// configurar UI de zoom
+				if (caps.zoom) {
+					zoomRange.min = caps.zoom.min ?? 1;
+					zoomRange.max = caps.zoom.max ?? 1;
+					zoomRange.step = caps.zoom.step ?? 0.1;
+					zoomRange.value = settings.zoom ?? zoomRange.min;
+					zoomRange.disabled = false;
+					zoomVal.textContent = `x${Number(zoomRange.value).toFixed(1)}`;
+				} else {
+					zoomRange.disabled = true;
+					zoomVal.textContent = '(zoom no soportado)';
+				}
+
+				// configurar UI de torch
+				if (caps.torch) {
+					torchBtn.disabled = false;
+				} else {
+					torchBtn.disabled = true;
+				}
+
+				logStatus(`Cámara abierta: ${settings.width || video.videoWidth}x${settings.height || video.videoHeight} / facing=${facing}`);
+			}
+
+			// ======== Modelo y calibración ========
+			async function loadModel() {
+				if (!modelo) {
+					logStatus("Cargando modelo coco-ssd…");
+					modelo = await cocoSsd.load();
+					logStatus("Modelo cargado ✅");
+				}
+			}
+
+			async function warmupAndCalibrate() {
+				// warmup + medición de ms de inferencia promedio
+				const times = [];
+				for (let i = 0; i < WARMUP_RUNS; i++) {
+					const t0 = performance.now();
+					await modelo.detect(video);
+					times.push(performance.now() - t0);
+				}
+				lastInferMsAvg = times.reduce((a,b)=>a+b,0) / times.length;
+
+				const vw = video.videoWidth, vh = video.videoHeight;
+				const pix = vw * vh;
+				targetFPS = estimateAutoFPS(lastInferMsAvg, pix);
+				fpsAutoEl.textContent = `${targetFPS} fps (avg ${lastInferMsAvg.toFixed(0)} ms)`;
+				logStatus(`Calibrado: avg ${lastInferMsAvg.toFixed(1)} ms, target ${targetFPS} fps`);
+			}
+
+			// ======== Loop de inferencia con throttling temporal ========
+			let lastInferTs = 0;
+			async function loop() {
+				rafId = requestAnimationFrame(loop);
+				if (!deteccionActiva || !modelo || video.readyState !== 4) return;
+
+				const now = performance.now();
+				const minInterval = 1000 / targetFPS;
+				if (now - lastInferTs < minInterval) return; // throttle por tiempo
+				lastInferTs = now;
+
+				let preds;
+				try {
+					const t0 = performance.now();
+					preds = await modelo.detect(video);
+					lastInferTime = performance.now() - t0;
+				} catch (e) {
+					console.error(e);
+					return;
+				}
+
+				// filtrar clases de interés
+				const objs = preds.filter(p => CLASES_INTERES.includes(p.class));
+
+				// solo redibujar si cambió el estado (para ahorrar draw calls)
+				// normalizamos para comparar
+				const state = objs.map(o => ({ class:o.class, bbox:o.bbox.slice(0,4) }));
+				if (arraysDiffer(state, lastDrawState)) {
+					drawDetections(objs);
+					lastDrawState = state;
+				}
+
+				// micro autoajuste dinámico (si se está tardando más, baja FPS; si menos, súbelo hasta budget)
+				const budgetFps = Math.max(1, Math.floor(BUDGET_MS_PER_SEC / Math.max(1, lastInferTime)));
+				// suavizar: moverse 1 fps por ciclo dentro del rango permitido
+				if (budgetFps < targetFPS) targetFPS = Math.max(1, targetFPS - 1);
+				else if (budgetFps > targetFPS && targetFPS < 30) targetFPS = targetFPS + 1;
+
+				fpsAutoEl.textContent = `${targetFPS} fps (avg ${lastInferMsAvg.toFixed(0)} ms | last ${lastInferTime.toFixed(0)} ms)`;
+			}
+
+			// ======== Controles ========
+			reopenBtn.addEventListener('click', async () => {
+				deteccionActiva = false;
+				cancelAnimationFrame(rafId);
+				try {
+					await openCamera(facingSel.value);
+					await warmupAndCalibrate();
+				} catch (e) {
+					console.error(e);
+					logStatus('Error re-abriendo cámara');
+				} finally {
+					deteccionActiva = true;
+					loop();
+				}
+			});
+
+			torchBtn.addEventListener('click', async () => {
+				if (!track || !caps.torch) return;
+				try {
+					// toggle manual
+					const currentTorch = track.getConstraints()?.advanced?.find(o => 'torch' in o)?.torch ?? false;
+					await track.applyConstraints({ advanced: [{ torch: !currentTorch }] });
+					torchBtn.textContent = !currentTorch ? '🔦 Linterna (ON)' : '🔦 Linterna';
+				} catch (e) {
+					console.warn('Torch no soportado/aplicado', e);
+				}
+			});
+
+			zoomRange.addEventListener('input', async (e) => {
+				if (!track || !caps.zoom) return;
+				const z = parseFloat(e.target.value);
+				try {
+					await track.applyConstraints({ advanced: [{ zoom: z }] });
+					zoomVal.textContent = `x${z.toFixed(1)}`;
+				} catch (e2) {
+					console.warn('Zoom no soportado/aplicado', e2);
+				}
+			});
+
+			// Ajuste del canvas si cambia el tamaño del video (algunos dispositivos renegocian)
+			video.addEventListener('loadedmetadata', () => setCanvasToVideo());
+			window.addEventListener('resize', () => setCanvasToVideo());
+
+			// Pausar cuando la pestaña no está visible (ahorro)
+			document.addEventListener('visibilitychange', () => {
+				if (document.hidden) {
+					deteccionActiva = false;
+				} else {
+					deteccionActiva = true;
+				}
+			});
+
+			// ======== Arranque ========
+			try {
+				await openCamera('environment');  // por defecto, trasera ideal
+				await loadModel();
+				await warmupAndCalibrate();
+				deteccionActiva = true;
+				loop();
+			} catch (e) {
+				console.error(e);
+				logStatus('Error inicializando');
+			}
+		})();
+	</script>
+</body>
+</html>

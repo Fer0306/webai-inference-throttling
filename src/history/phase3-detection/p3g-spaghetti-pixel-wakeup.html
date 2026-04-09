@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<!--
+	===============================================================
+		WebAI Inference Throttling — Phase 3g (Pixel Wake-Up System)
+	---------------------------------------------------------------
+
+	Descripción:
+		Sistema avanzado de inferencia en navegador que introduce un
+		mecanismo de reactivación basado en detección de cambios a nivel
+		de píxel, evitando el uso constante del modelo de IA.
+
+	Contexto:
+		Phase 3g — Activity-Aware Inference.
+		El sistema entra en estado de reposo tras inactividad y utiliza
+		análisis ligero de frames (pixel diff) para detectar movimiento
+		y reactivar automáticamente la inferencia.
+
+	Características clave:
+		- Inferencia con TensorFlow.js (coco-ssd)
+		- Throttling dinámico por frames (manual / automático)
+		- Comparación de detecciones (vector similarity)
+		- Renderizado basado en cambios (diff-based rendering)
+		- Pausa automática por inactividad
+		- Sistema de "wake-up" por cambio de píxeles (sin IA)
+		- Monitoreo ligero mediante canvas offscreen
+		- Reactivación automática al detectar movimiento
+		- Optimización de CPU/GPU y consumo energético
+
+	Archivo:
+		src/history/phase3-detection/p3g-spaghetti-pixel-wakeup.html
+
+	Proyecto: WebAI Inference Throttling
+	   Autor: Fernando Flores Alvarado
+	Licencia: MIT (Código) + CC BY 4.0 (documentación)
+
+		Nota: Este archivo representa una evolución donde el sistema separa
+			  el concepto de "detectar" del de "observar", permitiendo mantener
+			  conciencia del entorno con un costo computacional mínimo.
+	===============================================================
+-->
+<html lang="es">
+<head>
+	<meta charset="UTF-8" />
+	<title>Phase 3g — Pixel Wake-Up System (Activity-Aware)</title>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.13.0"></script>
+	<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+	<style>
+		body {
+			font-family: sans-serif;
+			background: #222;
+			color: #eee;
+			margin: 0;
+			padding: 0;
+			text-align: center;
+		}
+		#contenedor {
+			position: relative;
+			max-width: 75%;
+			margin: auto;
+		}
+		video, canvas {
+			width: 100%; /* Responsive visual size */
+			height: auto;
+			display: block;
+			position: absolute;
+			top: 0;
+			left: 0;
+		}
+		canvas {
+			pointer-events: none;
+		}
+		#frecuencia {
+			margin: 10px;
+			font-size: 16px;
+		}
+		#reanudarBtn {
+			margin-top: 20px;
+			padding: 10px 20px;
+			font-size: 16px;
+			background: limegreen;
+			color: black;
+			border: none;
+			border-radius: 8px;
+			cursor: pointer;
+			display: none;
+		}
+		#contadorInactividad {
+			margin-top: 10px;
+			font-size: 14px;
+			color: #ccc;
+			padding: 6px 12px;
+			border: 4px solid gray;
+			border-radius: 10px;
+			display: inline-block;
+			min-width: 180px;
+			transition: border-color 0.3s ease;
+		}
+	</style>
+</head>
+<body>
+	<h2>Phase 3g — Pixel Wake-Up System (Activity-Aware)</h2>
+
+	<div style="margin: 10px 0;">
+		<label for="frecuencia">Analizar cada:</label>
+		<select id="frecuencia">
+			<option value="auto" selected>Automático</option>
+			<option value="1">1 frame (todos)</option>
+			<option value="3">3 frames</option>
+			<option value="5">5 frames</option>
+			<option value="10">10 frames</option>
+		</select>
+
+		<button id="reanudarBtn">Reanudar detección</button>
+
+		<div id="contadorInactividad" style="margin-top:10px; font-size:14px; color:#ccc;">
+		⏳ Tiempo hasta pausa: -- segundos
+		</div>
+
+	</div>
+
+	<div id="contenedor">
+		<video id="video" autoplay muted playsinline></video>
+		<canvas id="canvas"></canvas>
+	</div>
+
+	<script>
+		const video = document.getElementById('video');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+		const selectorFrecuencia = document.getElementById('frecuencia');
+		const reanudarBtn = document.getElementById('reanudarBtn');
+
+		// Configuración
+		const AHORRO_ENERGIA = true;
+		const TIEMPO_INACTIVIDAD_MS = 20000;
+		// Cronometro
+		const contadorElemento = document.getElementById("contadorInactividad");
+		let segundosRestantes = TIEMPO_INACTIVIDAD_MS / 1000;
+		let intervaloContador;
+
+
+		let modelo;
+		let deteccionesAnteriores = [];
+		let cadaCuantosFrames = 3;
+		let frameCount = 0;
+		let deteccionActiva = true;
+		let temporizadorInactividad;
+		let monitorCambioInterval;
+		let ultimaCaptura = null;
+
+		function sonCajasSimilares(caja1, caja2, tolerancia = 10) {
+			return caja1.every((valor, i) => Math.abs(valor - caja2[i]) <= tolerancia);
+		}
+
+		function yaFueDetectada(nueva, anteriores) {
+			return anteriores.some(ant => ant.class === nueva.class && sonCajasSimilares(ant.bbox, nueva.bbox));
+		}
+
+		function dibujarCaja(b) {
+			const [x, y, w, h] = b.bbox;
+			ctx.strokeStyle = 'lime';
+			ctx.lineWidth = 2;
+			ctx.strokeRect(x, y, w, h);
+			ctx.font = '12px sans-serif';
+			ctx.fillStyle = 'lime';
+			ctx.fillText(`${b.class} (${(b.score * 100).toFixed(1)}%)`, x, y - 5);
+		}
+
+		function ajustarCanvasAlVideo() {
+			canvas.width = video.videoWidth;
+			canvas.height = video.videoHeight;
+		}
+
+		function calcularFrecuenciaSegunResolucion(width, height) {
+			const total = width * height;
+			if (total <= 320 * 240) return 2;
+			if (total <= 640 * 480) return 4;
+			if (total <= 1280 * 720) return 6;
+			return 10;
+		}
+
+		function actualizarContador() {
+			contadorElemento.innerText = `⏳ Tiempo hasta pausa: ${segundosRestantes} segundos`;
+
+			// Cambiar color del borde como semáforo
+			if (!deteccionActiva) {
+				contadorElemento.style.borderColor = 'gray';
+			} else if (segundosRestantes > 10) {
+				contadorElemento.style.borderColor = 'limegreen';
+			} else if (segundosRestantes > 5) {
+				contadorElemento.style.borderColor = 'gold';
+			} else {
+				contadorElemento.style.borderColor = 'red';
+			}
+		}
+
+		function reiniciarInactividad() {
+			clearTimeout(temporizadorInactividad);
+			clearInterval(intervaloContador);
+
+			if (!AHORRO_ENERGIA) return;
+
+			segundosRestantes = TIEMPO_INACTIVIDAD_MS / 1000;
+			actualizarContador(); // Mostrar primer valor de inmediato
+
+			intervaloContador = setInterval(() => {
+				segundosRestantes--;
+				actualizarContador();
+			}, 1000);
+
+			temporizadorInactividad = setTimeout(() => { // Cuando se pausa
+				deteccionActiva = false;
+				reanudarBtn.style.display = 'inline-block';
+				clearInterval(intervaloContador);
+				contadorElemento.innerText = "⏸️ Detección pausada por inactividad.";
+				contadorElemento.style.borderColor = 'gray';
+				console.log("⏸️ Detección pausada por inactividad.");
+				iniciarMonitoreoCambio();
+			}, TIEMPO_INACTIVIDAD_MS);
+		}
+
+		function iniciarMonitoreoCambio() {
+			const tempCanvas = document.createElement('canvas');
+			const tempCtx = tempCanvas.getContext('2d');
+			tempCanvas.width = canvas.width;
+			tempCanvas.height = canvas.height;
+
+			monitorCambioInterval = setInterval(() => {
+				tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+				const actual = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
+
+				if (ultimaCaptura) {
+					let cambio = 0;
+					for (let i = 0; i < actual.length; i += 20) {
+						if (Math.abs(actual[i] - ultimaCaptura[i]) > 30) {
+						cambio++;
+						if (cambio > 500) break;
+						}
+					}
+					if (cambio > 500) {
+						console.log("🔄 Movimiento detectado, reactivando detección");
+						detenerMonitoreoCambio();
+						deteccionActiva = true;
+						reanudarBtn.style.display = 'none';
+						reiniciarInactividad();
+					}
+				}
+				ultimaCaptura = new Uint8ClampedArray(actual);
+			}, 1000);
+		}
+
+		function detenerMonitoreoCambio() {
+			clearInterval(monitorCambioInterval);
+			monitorCambioInterval = null;
+			ultimaCaptura = null;
+		}
+
+		async function procesarFrame() {
+			if (video.readyState !== 4 || !deteccionActiva) {
+				requestAnimationFrame(procesarFrame);
+				return;
+			}
+
+			frameCount++;
+
+			if (frameCount % cadaCuantosFrames === 0) {
+				const predicciones = await modelo.detect(video);
+				const soloBotellas = predicciones.filter(p => p.class === 'bottle');
+
+				const hayCambios = soloBotellas.length !== deteccionesAnteriores.length ||
+				soloBotellas.some(b => !yaFueDetectada(b, deteccionesAnteriores));
+
+				if (hayCambios) {
+					ctx.clearRect(0, 0, canvas.width, canvas.height);
+					soloBotellas.forEach(dibujarCaja);
+					deteccionesAnteriores = soloBotellas;
+					reiniciarInactividad(); // Reinicia el contador si hay cambios
+				}
+			}
+
+			requestAnimationFrame(procesarFrame);
+		}
+
+		async function iniciar() {
+			const stream = await navigator.mediaDevices.getUserMedia({
+				// 🔻 Resolución Baja de entrada para menor consumo
+//				video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'environment' }
+				// 🔻 Resolución Mediana de entrada para menor consumo
+				video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'environment' }
+			});
+
+			video.srcObject = stream;
+
+			await new Promise(resolve => {
+				video.onloadedmetadata = () => {
+				ajustarCanvasAlVideo(); // Asegura que canvas y video coincidan desde el inicio
+
+				// Solo si está seleccionado "auto"
+				if (selectorFrecuencia.value === "auto") {
+					const sugerido = calcularFrecuenciaSegunResolucion(video.videoWidth, video.videoHeight);
+					cadaCuantosFrames = sugerido;
+					console.log(`Frecuencia autoajustada a ${sugerido} frames.`);
+				} else {
+					cadaCuantosFrames = parseInt(selectorFrecuencia.value);
+				}
+
+				resolve();
+				};
+			});
+
+			modelo = await cocoSsd.load();
+			console.log('✅ Modelo cargado');
+			reiniciarInactividad(); // Iniciar temporizador al cargar
+			requestAnimationFrame(procesarFrame);
+		}
+
+		selectorFrecuencia.addEventListener("change", () => {
+			if (selectorFrecuencia.value === "auto") {
+				const sugerido = calcularFrecuenciaSegunResolucion(video.videoWidth, video.videoHeight);
+				cadaCuantosFrames = sugerido;
+				console.log(`🔄 Recalculo automático: ${sugerido} frames`);
+			} else {
+				cadaCuantosFrames = parseInt(selectorFrecuencia.value);
+				console.log(`⚙️ Frecuencia manual: ${cadaCuantosFrames} frames`);
+			}
+		});
+
+		reanudarBtn.addEventListener("click", () => {
+			detenerMonitoreoCambio();
+			deteccionActiva = true;
+			reanudarBtn.style.display = 'none';
+			reiniciarInactividad();
+			console.log("▶️ Detección reanudada manualmente.");
+		});
+
+		// También reanudar al tocar el video
+		video.addEventListener("click", () => {
+			if (!deteccionActiva) {
+				detenerMonitoreoCambio();
+				deteccionActiva = true;
+				reanudarBtn.style.display = 'none';
+				reiniciarInactividad();
+				console.log("👆 Detección reanudada por toque.");
+			}
+		});
+
+		iniciar();
+	</script>
+</body>
+</html>
