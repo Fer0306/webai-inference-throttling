@@ -92,7 +92,7 @@ Se introduce `ThrottleController`, que **calibra el dispositivo automáticamente
 
 ### Demo 4 — IoU Tracker · 4 Módulos
 
-**[▶ Ver Demo 3](./v4-ioutracker/index.html)**
+**[▶ Ver Demo 4](./v4-ioutracker/index.html)**
 
 El `VectorProcessor` evoluciona a un **Object Tracker** real. Cada objeto detectado recibe una **identidad persistente** (`#id`) que se mantiene entre frames. El matching usa **Intersection over Union (IoU)** como criterio primario, con fallback por **distancia euclidiana de centros**. Los objetos no vistos envejecen y son eliminados al superar `MAX_AGE` frames.
 
@@ -118,21 +118,21 @@ El `VectorProcessor` evoluciona a un **Object Tracker** real. Cada objeto detect
 
 ### Comparativa de los 4 Demos
 
-| Característica | Demo 1 | Demo 2 | Demo 3 |
-|---|:---:|:---:|:---:|
-| Módulos | 3 | 5 | 5 |
-| Throttling | Manual | AUTO | AUTO |
-| Calibración warmup | ✗ | ✅ | ✅ |
-| Ajuste dinámico de FPS | ✗ | ✅ | ✅ |
-| Pausa por inactividad | ✗ | ✅ | ✅ |
-| Pausa por visibilidad | ✗ | ✅ | ✅ |
-| HiDPI canvas | ✗ | ✅ | ✅ |
-| Evita redraws innecesarios | ✗ | ✅ | ✅ |
-| Identidad persistente por objeto | ✗ | ✗ | ✅ |
-| Matching por IoU | ✗ | ✗ | ✅ |
-| Fallback por centroide | ✗ | ✗ | ✅ |
-| stableFrames visual | ✗ | ✗ | ✅ |
-| MAX_AGE / envejecimiento | ✗ | ✗ | ✅ |
+| Característica | Demo 1 | Demo 2 | Demo 3 | Demo 4 |
+|---|:---:|:---:|:---:|:---:|
+| Módulos | 3 | 4 | 5 | 5 |
+| Throttling | Manual | Manual | AUTO | AUTO |
+| Calibración warmup | ✗ | ✗ | ✅ | ✅ |
+| Ajuste dinámico de FPS | ✗ | ✗ | ✅ | ✅ |
+| Pausa por inactividad | ✗ | ✗ | ✅ | ✅ |
+| Pausa por visibilidad | ✗ | ✗ | ✅ | ✅ |
+| HiDPI canvas | ✗ | ✅ | ✅ | ✅ |
+| Evita redraws innecesarios | ✗ | ✅ | ✅ | ✅ |
+| Identidad persistente por objeto | ✗ | ✗ | ✗ | ✅ |
+| Matching por IoU | ✗ | ✗ | ✗ | ✅ |
+| Fallback por centroide | ✗ | ✗ | ✗ | ✅ |
+| stableFrames visual | ✗ | ✗ | ✗ | ✅ |
+| MAX_AGE / envejecimiento | ✗ | ✗ | ✗ | ✅ |
 
 ---
 

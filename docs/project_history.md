@@ -38,13 +38,13 @@ Esos dos problemas son el origen directo de WebAI Inference Throttling y de todo
 ## Línea de tiempo del proyecto
 
 ```
-2009 ──── Diselo de la herramienta para BotellaControl
+2009 ──── Diseño de la herramienta para BotellaControl
 
 (2010 - 2014) ──── Desarrollo activo de la herramienta para BotellaControl
 
      ──── Pausa en el proyecto (No existia Machine Learning) para detectar la botella
 
-~2024 - 2025 ─── Retoma del proyecto con nueva perspectiva (Integrar Vamara y Machine Learning)
+~2024 - 2025 ─── Retoma del proyecto con nueva perspectiva (Integrar Cámara y Machine Learning)
 
 2025 ──── BotellaControl: primer contacto con los problemas reales:
             1. El dispositivo se calienta muy rápido.
@@ -112,7 +112,7 @@ Esos dos problemas son el origen directo de WebAI Inference Throttling y de todo
 
      ──── Pausa de ~8 meses (Inicio de Proyecto en OWASP - OWASP Project Leader)
 
-~2026 ─── Retoma del proyectocon
+~2026 ─── Retoma del proyecto con
            Refactorización profunda de todos los módulos
            ThrottleController como clase encapsulada
            VectorProcessor: tracking por IoU

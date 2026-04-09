@@ -207,7 +207,7 @@ El sistema evoluciona a través de distintas técnicas de procesamiento en la Ca
 Ubicados en:
 
 ```
-src/demos/
+src/demo/
 ```
 
 ## 🧪 Objetos detectados en la demo
@@ -284,7 +284,7 @@ webai-inference-throttling/
 │   └── techniques.md                    ← Técnicas implementadas y roadmap de mejoras
 │
 ├── 💻 src/
-│   ├── 👁️ demos/                     ←  Demostraciones para el usuario prueba
+│   ├── 👁️ demo/                     ←  Demostraciones para el usuario prueba
 │   │   ├── v1-three-layers/              ← 3 capas (Ptototipo inical para crear la arquitectura definida)
 │   │   ├── v2-four-layers/               ← 4 capas (Arquitectura definida completamente y corectamente)
 │   │   ├── v3-vectordiff/                ← 4 capas + Comparación simple por vectores
